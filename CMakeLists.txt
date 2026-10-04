@@ -11,9 +11,9 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 add_executable(qalam
+        src/main.cpp
         src/terminal/terminal.cpp
         src/terminal/terminal.h
-        src/terminal/terminal.cpp
 )
 
 target_include_directories(qalam PRIVATE src)
