@@ -13,7 +13,8 @@ endif()
 add_executable(qalam
         src/main.cpp
         src/terminal/terminal.cpp
-        src/terminal.h
+        src/terminal/terminal.h
+        src/terminal/terminal.cpp
 )
 
 target_include_directories(qalam PRIVATE src)
