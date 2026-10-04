@@ -20,6 +20,7 @@ add_executable(qalam
         src/text/columns.h
         src/buffer/text_buffer.h
         src/buffer/line_buffer.h
+        src/buffer/line_buffer.cpp
 )
 
 target_include_directories(qalam PRIVATE src)
