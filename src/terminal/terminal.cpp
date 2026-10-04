@@ -128,7 +128,7 @@ Key decodeEscape() {
     return {KeyType::Unknown, 0};
 }
 
-}
+}  // namespace
 
 Key readKey() {
     auto b = readByte();

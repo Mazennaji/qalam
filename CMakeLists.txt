@@ -16,6 +16,8 @@ add_executable(qalam
         src/terminal/terminal.h
         src/render/render.cpp
         src/render/render.h
+        src/text/columns.cpp
+        src/text/columns.h
 )
 
 target_include_directories(qalam PRIVATE src)
