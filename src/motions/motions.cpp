@@ -1,5 +1,6 @@
 #include "motions/motions.h"
 
+#include <algorithm>
 #include <cctype>
 #include <string>
 
@@ -17,7 +18,9 @@ std::size_t lastColumn(const std::string& line) {
     return line.empty() ? 0 : line.size() - 1;
 }
 
-Pos nextWordStart(const TextBuffer& buffer, Pos p) {
+Pos nextWordStart(const TextBuffer& buffer, Pos p, bool& hitEnd) {
+    hitEnd = false;
+
     const std::string& first = buffer.line(p.row);
     if (p.col < first.size()) {
         const int cls = charClass(first[p.col]);
@@ -30,7 +33,10 @@ Pos nextWordStart(const TextBuffer& buffer, Pos p) {
         const std::string& line = buffer.line(p.row);
         while (p.col < line.size() && charClass(line[p.col]) == 0) ++p.col;
         if (p.col < line.size()) return p;
-        if (p.row + 1 >= buffer.lineCount()) return {p.row, lastColumn(line)};
+        if (p.row + 1 >= buffer.lineCount()) {
+            hitEnd = true;
+            return {p.row, lastColumn(line)};
+        }
         ++p.row;
         p.col = 0;
         if (buffer.line(p.row).empty()) return p;
@@ -102,8 +108,38 @@ Pos prevParagraph(const TextBuffer& buffer, Pos p) {
 }
 
 Motion wordForward(const TextBuffer& buffer, Pos from, int count) {
-    for (int i = 0; i < count; ++i) from = nextWordStart(buffer, from);
+    for (int i = 0; i < count; ++i) {
+        bool hitEnd = false;
+        from = nextWordStart(buffer, from, hitEnd);
+    }
     return {from, false, false};
+}
+
+Motion wordForwardForOperator(const TextBuffer& buffer, Pos from, int count) {
+    for (int i = 0; i < count; ++i) {
+        bool hitEnd = false;
+        const Pos next = nextWordStart(buffer, from, hitEnd);
+        const bool last = i + 1 == count;
+        if (last && (hitEnd || next.row > from.row)) {
+            const std::size_t row = hitEnd ? next.row : from.row;
+            return {{row, buffer.line(row).size()}, false, false};
+        }
+        from = next;
+    }
+    return {from, false, false};
+}
+
+Motion changeWord(const TextBuffer& buffer, Pos from, int count) {
+    const std::string& line = buffer.line(from.row);
+    if (from.col >= line.size() || charClass(line[from.col]) == 0) {
+        return wordForwardForOperator(buffer, from, count);
+    }
+
+    const int cls = charClass(line[from.col]);
+    Pos p = from;
+    while (p.col + 1 < line.size() && charClass(line[p.col + 1]) == cls) ++p.col;
+    for (int i = 1; i < count; ++i) p = nextWordEnd(buffer, p);
+    return {p, false, true};
 }
 
 Motion wordBackward(const TextBuffer& buffer, Pos from, int count) {
@@ -130,6 +166,43 @@ Motion paragraphForward(const TextBuffer& buffer, Pos from, int count) {
 Motion paragraphBackward(const TextBuffer& buffer, Pos from, int count) {
     for (int i = 0; i < count; ++i) from = prevParagraph(buffer, from);
     return {from, false, false};
+}
+
+std::optional<Motion> charLeft(Pos from, int count) {
+    if (from.col == 0) return std::nullopt;
+    const auto n = static_cast<std::size_t>(count);
+    return Motion{{from.row, from.col > n ? from.col - n : 0}, false, false};
+}
+
+std::optional<Motion> charRight(const TextBuffer& buffer, Pos from, int count) {
+    const std::size_t length = buffer.line(from.row).size();
+    if (from.col >= length) return std::nullopt;
+    const auto n = static_cast<std::size_t>(count);
+    return Motion{{from.row, std::min(from.col + n, length)}, false, false};
+}
+
+std::optional<Motion> lineUp(Pos from, int count) {
+    if (from.row == 0) return std::nullopt;
+    const auto n = static_cast<std::size_t>(count);
+    return Motion{{from.row > n ? from.row - n : 0, from.col}, true, false};
+}
+
+std::optional<Motion> lineDown(const TextBuffer& buffer, Pos from, int count) {
+    if (from.row + 1 >= buffer.lineCount()) return std::nullopt;
+    const auto n = static_cast<std::size_t>(count);
+    return Motion{{std::min(from.row + n, buffer.lineCount() - 1), from.col}, true, false};
+}
+
+Motion lineStart(Pos from) {
+    return {{from.row, 0}, false, false};
+}
+
+Motion lineEnd(const TextBuffer& buffer, Pos from) {
+    return {{from.row, lastColumn(buffer.line(from.row))}, false, true};
+}
+
+Motion gotoLine(const TextBuffer& buffer, std::size_t row) {
+    return {{std::min(row, buffer.lineCount() - 1), 0}, true, false};
 }
 
 std::optional<Motion> findChar(const TextBuffer& buffer, Pos from, char ch, bool forward,
