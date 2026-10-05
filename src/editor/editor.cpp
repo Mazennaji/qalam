@@ -47,6 +47,7 @@ void Editor::open(const std::string& path) {
             message_ = "Cannot read \"" + path + "\"";
             break;
     }
+    mode_ = Mode::Normal;
     row_ = 0;
     col_ = 0;
     wantedCol_ = 0;
@@ -62,11 +63,17 @@ void Editor::resize(Size size) {
 }
 
 void Editor::handleKey(const Key& key) {
-    if (mode_ == Mode::Command) {
-        handleCommandKey(key);
-    } else {
-        message_.clear();
-        handleNormalKey(key);
+    switch (mode_) {
+        case Mode::Command:
+            handleCommandKey(key);
+            break;
+        case Mode::Insert:
+            handleInsertKey(key);
+            break;
+        case Mode::Normal:
+            message_.clear();
+            handleNormalKey(key);
+            break;
     }
     scroll();
 }
@@ -78,7 +85,11 @@ bool Editor::shouldQuit() const {
 ViewState Editor::view() const {
     ViewState v;
     v.buffer = buffer_.get();
-    v.mode = mode_ == Mode::Command ? "COMMAND" : "NORMAL";
+    switch (mode_) {
+        case Mode::Normal: v.mode = "NORMAL"; break;
+        case Mode::Insert: v.mode = "INSERT"; break;
+        case Mode::Command: v.mode = "COMMAND"; break;
+    }
     v.fileName = path_;
     v.modified = modified_;
     v.commandLine = mode_ == Mode::Command;
@@ -106,6 +117,7 @@ void Editor::handleNormalKey(const Key& key) {
         case KeyType::End: moveToLineEnd(); return;
         case KeyType::PageUp: pageUp(); return;
         case KeyType::PageDown: pageDown(); return;
+        case KeyType::Delete: deleteUnderCursor(); return;
         case KeyType::Char: break;
         default: return;
     }
@@ -125,10 +137,48 @@ void Editor::handleNormalKey(const Key& key) {
                 pendingG_ = true;
             }
             break;
+        case 'i':
+            enterInsert();
+            break;
+        case 'a':
+            col_ = buffer_->line(row_).empty() ? 0 : col_ + 1;
+            enterInsert();
+            break;
+        case 'I':
+            col_ = firstNonBlank(row_);
+            enterInsert();
+            break;
+        case 'A':
+            col_ = buffer_->line(row_).size();
+            enterInsert();
+            break;
+        case 'o': openLine(row_ + 1); break;
+        case 'O': openLine(row_); break;
+        case 'x': deleteUnderCursor(); break;
         case ':':
             mode_ = Mode::Command;
             commandText_.clear();
             break;
+        default: break;
+    }
+}
+
+void Editor::handleInsertKey(const Key& key) {
+    switch (key.type) {
+        case KeyType::Escape: leaveInsert(); break;
+        case KeyType::Char: insertText(key.ch); break;
+        case KeyType::Tab: insertText('\t'); break;
+        case KeyType::Enter: insertNewline(); break;
+        case KeyType::Backspace: backspace(); break;
+        case KeyType::Delete: deleteForward(); break;
+        case KeyType::Up: moveUp(); break;
+        case KeyType::Down: moveDown(); break;
+        case KeyType::Left: moveLeft(); break;
+        case KeyType::Right: moveRight(); break;
+        case KeyType::Home: moveToLineStart(); break;
+        case KeyType::End: moveToLineEnd(); break;
+        case KeyType::PageUp: pageUp(); break;
+        case KeyType::PageDown: pageDown(); break;
         default: break;
     }
 }
@@ -212,6 +262,76 @@ void Editor::requestQuit(bool force) {
     quit_ = true;
 }
 
+void Editor::enterInsert() {
+    mode_ = Mode::Insert;
+    wantedCol_ = col_;
+}
+
+void Editor::leaveInsert() {
+    mode_ = Mode::Normal;
+    if (col_ > 0) --col_;
+    col_ = std::min(col_, maxColumn(row_));
+    wantedCol_ = col_;
+}
+
+void Editor::insertText(char c) {
+    buffer_->insertChar(row_, col_, c);
+    ++col_;
+    wantedCol_ = col_;
+    modified_ = true;
+}
+
+void Editor::insertNewline() {
+    buffer_->splitLine(row_, col_);
+    ++row_;
+    col_ = 0;
+    wantedCol_ = 0;
+    modified_ = true;
+}
+
+void Editor::backspace() {
+    if (col_ > 0) {
+        buffer_->eraseChar(row_, col_ - 1);
+        --col_;
+    } else if (row_ > 0) {
+        const std::size_t previousLength = buffer_->line(row_ - 1).size();
+        buffer_->joinLines(row_ - 1);
+        --row_;
+        col_ = previousLength;
+    } else {
+        return;
+    }
+    wantedCol_ = col_;
+    modified_ = true;
+}
+
+void Editor::deleteForward() {
+    if (col_ < buffer_->line(row_).size()) {
+        buffer_->eraseChar(row_, col_);
+    } else if (row_ + 1 < buffer_->lineCount()) {
+        buffer_->joinLines(row_);
+    } else {
+        return;
+    }
+    modified_ = true;
+}
+
+void Editor::deleteUnderCursor() {
+    if (buffer_->line(row_).empty()) return;
+    buffer_->eraseChar(row_, col_);
+    col_ = std::min(col_, maxColumn(row_));
+    wantedCol_ = col_;
+    modified_ = true;
+}
+
+void Editor::openLine(std::size_t index) {
+    buffer_->insertLine(index, "");
+    row_ = index;
+    col_ = 0;
+    modified_ = true;
+    enterInsert();
+}
+
 void Editor::moveLeft() {
     if (col_ > 0) --col_;
     wantedCol_ = col_;
@@ -275,7 +395,14 @@ void Editor::scroll() {
 
 std::size_t Editor::maxColumn(std::size_t row) const {
     const std::size_t length = buffer_->line(row).size();
+    if (mode_ == Mode::Insert) return length;
     return length == 0 ? 0 : length - 1;
+}
+
+std::size_t Editor::firstNonBlank(std::size_t row) const {
+    const std::string& text = buffer_->line(row);
+    const auto pos = text.find_first_not_of(" \t");
+    return pos == std::string::npos ? text.size() : pos;
 }
 
 std::size_t Editor::textRows() const {
