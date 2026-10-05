@@ -14,15 +14,17 @@ add_executable(qalam
         src/main.cpp
         src/terminal/terminal.cpp
         src/terminal/terminal.h
-        src/render/render.cpp
-        src/render/render.h
         src/text/columns.cpp
         src/text/columns.h
         src/buffer/text_buffer.h
-        src/buffer/line_buffer.h
         src/buffer/line_buffer.cpp
-        src/buffer/file_io.h
+        src/buffer/line_buffer.h
         src/buffer/file_io.cpp
+        src/buffer/file_io.h
+        src/render/render.cpp
+        src/render/render.h
+        src/editor/editor.cpp
+        src/editor/editor.h
 )
 
 target_include_directories(qalam PRIVATE src)
