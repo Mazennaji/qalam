@@ -39,29 +39,6 @@ void LineBuffer::assign(std::vector<std::string> lines) {
     if (lines_.empty()) lines_.emplace_back();
 }
 
-void LineBuffer::insertChar(std::size_t row, std::size_t col, char c) {
-    lines_[row].insert(col, 1, c);
-}
-
-void LineBuffer::eraseChar(std::size_t row, std::size_t col) {
-    lines_[row].erase(col, 1);
-}
-
-void LineBuffer::splitLine(std::size_t row, std::size_t col) {
-    std::string rest = lines_[row].substr(col);
-    lines_[row].erase(col);
-    lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(row) + 1, std::move(rest));
-}
-
-void LineBuffer::joinLines(std::size_t row) {
-    lines_[row] += lines_[row + 1];
-    lines_.erase(lines_.begin() + static_cast<std::ptrdiff_t>(row) + 1);
-}
-
-void LineBuffer::insertLine(std::size_t index, std::string text) {
-    lines_.insert(lines_.begin() + static_cast<std::ptrdiff_t>(index), std::move(text));
-}
-
 std::string LineBuffer::text(Pos start, Pos end) const {
     if (start.row == end.row) {
         return lines_[start.row].substr(start.col, end.col - start.col);
