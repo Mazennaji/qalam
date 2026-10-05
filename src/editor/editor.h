@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "buffer/text_buffer.h"
@@ -31,7 +32,13 @@ private:
         bool valid = false;
     };
 
+    struct Register {
+        std::string text;
+        bool linewise = false;
+    };
+
     void handleNormalKey(const Key& key);
+    void handleOperatorKey(const Key& key, bool wasPendingG);
     void handleInsertKey(const Key& key);
     void handleCommandKey(const Key& key);
     void runCommand(const std::string& text);
@@ -46,6 +53,10 @@ private:
     void deleteForward();
     void deleteUnderCursor();
     void openLine(std::size_t index);
+
+    std::optional<Motion> operatorMotion(const Key& key, bool wasPendingG) const;
+    void operate(char op, const Motion& motion);
+    void put(bool after);
 
     void moveLeft();
     void moveRight();
@@ -80,7 +91,9 @@ private:
     std::size_t rowOff_ = 0;
     int colOff_ = 0;
     FindState lastFind_;
+    Register reg_;
     char pendingFind_ = 0;
+    char pendingOp_ = 0;
     bool modified_ = false;
     bool pendingG_ = false;
     bool quit_ = false;
