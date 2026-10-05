@@ -1,59 +1,39 @@
-#include <algorithm>
 #include <cstdio>
 #include <exception>
-#include <string>
+#include <memory>
 
+#include "buffer/line_buffer.h"
+#include "editor/editor.h"
 #include "render/render.h"
 #include "terminal/terminal.h"
 
 using namespace qalam;
 
-int main() {
+int main(int argc, char** argv) {
     try {
         RawMode raw;
         AlternateScreen screen;
 
-        int row = 0;
-        int col = 0;
-        std::string lastKey = "none";
-        std::string message = "Ctrl-Q quits. Arrows, Home, End, PageUp, PageDown move the cursor.";
+        Editor editor(std::make_unique<LineBuffer>());
+        if (argc > 1) editor.open(argv[1]);
 
-        while (true) {
-            const Size size = windowSize();
-            const int textRows = std::max(1, size.rows - 2);
-            row = std::clamp(row, 0, textRows - 1);
-            col = std::clamp(col, 0, size.cols - 1);
+        Size size = windowSize();
+        editor.resize(size);
 
-            ViewState view;
-            view.mode = "NORMAL";
-            view.status = "key: " + lastKey;
-            view.message = message;
-            view.cursorRow = row;
-            view.cursorCol = col;
-            writeAll(renderFrame(size, view));
+        while (!editor.shouldQuit()) {
+            writeAll(renderFrame(size, editor.view()));
 
-            Key key;
-            while ((key = readKey()).type == KeyType::None) {
-                if (windowSize() != size) break;
+            Key key = readKey();
+            while (key.type == KeyType::None && windowSize() == size) {
+                key = readKey();
             }
-            if (key.type == KeyType::None) continue;
 
-            lastKey = keyName(key);
-            message.clear();
-
-            if (key.type == KeyType::Ctrl && key.ch == 'q') break;
-
-            switch (key.type) {
-                case KeyType::Up: --row; break;
-                case KeyType::Down: ++row; break;
-                case KeyType::Left: --col; break;
-                case KeyType::Right: ++col; break;
-                case KeyType::Home: col = 0; break;
-                case KeyType::End: col = size.cols - 1; break;
-                case KeyType::PageUp: row = 0; break;
-                case KeyType::PageDown: row = textRows - 1; break;
-                default: break;
+            const Size current = windowSize();
+            if (current != size) {
+                size = current;
+                editor.resize(size);
             }
+            if (key.type != KeyType::None) editor.handleKey(key);
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "%s\n", e.what());
