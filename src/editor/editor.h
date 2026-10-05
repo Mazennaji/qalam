@@ -9,6 +9,7 @@
 #include "motions/motions.h"
 #include "render/render.h"
 #include "terminal/terminal.h"
+#include "undo/history.h"
 
 namespace qalam {
 
@@ -51,17 +52,28 @@ private:
     void insertNewline();
     void backspace();
     void deleteForward();
-    void deleteUnderCursor();
-    void openLine(std::size_t index);
+    void deleteUnderCursor(int count);
+    void openLine(bool below);
 
-    std::optional<Motion> operatorMotion(const Key& key, bool wasPendingG) const;
+    void applyEdit(Pos start, Pos end, const std::string& text);
+    void undo(int count);
+    void redo(int count);
+    void placeCursor(Pos where);
+
+    bool hasCount() const;
+    int takeCount();
+    void resetPending();
+    std::string pendingText() const;
+
+    std::optional<Motion> operatorMotion(const Key& key, bool wasPendingG, int count,
+                                         bool counted) const;
     void operate(char op, const Motion& motion);
-    void put(bool after);
+    void put(bool after, int count);
 
-    void moveLeft();
-    void moveRight();
-    void moveUp();
-    void moveDown();
+    void moveLeft(std::size_t n = 1);
+    void moveRight(std::size_t n = 1);
+    void moveUp(std::size_t n = 1);
+    void moveDown(std::size_t n = 1);
     void moveToLineStart();
     void moveToLineEnd();
     void moveToLine(std::size_t line);
@@ -70,8 +82,8 @@ private:
     void jumpTo(const Motion& motion);
 
     void startFind(char kind, char ch);
-    void repeatFind(bool reverse);
-    void runFind(const FindState& find, bool repeat);
+    void repeatFind(bool reverse, int count);
+    void runFind(const FindState& find, bool repeat, int count);
 
     void applyWantedColumn();
     void scroll();
@@ -80,6 +92,7 @@ private:
     int renderColumn() const;
 
     std::unique_ptr<TextBuffer> buffer_;
+    UndoHistory history_;
     std::string path_;
     std::string message_;
     std::string commandText_;
@@ -92,9 +105,10 @@ private:
     int colOff_ = 0;
     FindState lastFind_;
     Register reg_;
+    int count_ = 0;
+    int opCount_ = 0;
     char pendingFind_ = 0;
     char pendingOp_ = 0;
-    bool modified_ = false;
     bool pendingG_ = false;
     bool quit_ = false;
 };
