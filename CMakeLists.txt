@@ -22,6 +22,7 @@ add_executable(qalam
         src/buffer/line_buffer.h
         src/buffer/line_buffer.cpp
         src/buffer/file_io.h
+        src/buffer/file_io.cpp
 )
 
 target_include_directories(qalam PRIVATE src)
