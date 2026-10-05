@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <utility>
 
+#include "text/columns.h"
+
 namespace qalam {
 namespace {
 
@@ -35,6 +37,13 @@ void appendWelcome(std::string& out, int cols) {
     out += text;
 }
 
+void appendTextRow(std::string& out, const std::string& line, int colOffset, int cols) {
+    const std::string text = expandTabs(line);
+    const auto start = static_cast<std::size_t>(std::max(colOffset, 0));
+    if (start >= text.size()) return;
+    out.append(text, start, static_cast<std::size_t>(std::max(cols, 0)));
+}
+
 }
 
 std::string renderFrame(Size size, const ViewState& view) {
@@ -45,8 +54,13 @@ std::string renderFrame(Size size, const ViewState& view) {
     out += "\x1b[H";
 
     const int textRows = std::max(1, size.rows - 2);
+    const std::size_t lineCount = view.buffer != nullptr ? view.buffer->lineCount() : 0;
+
     for (int y = 0; y < textRows; ++y) {
-        if (y == textRows / 3) {
+        const std::size_t row = view.rowOffset + static_cast<std::size_t>(y);
+        if (row < lineCount) {
+            appendTextRow(out, view.buffer->line(row), view.colOffset, size.cols);
+        } else if (view.showWelcome && y == textRows / 3) {
             appendWelcome(out, size.cols);
         } else {
             out += '~';
@@ -54,9 +68,10 @@ std::string renderFrame(Size size, const ViewState& view) {
         out += "\x1b[K\r\n";
     }
 
-    const std::string left = " " + view.mode + " | " + view.status;
-    const std::string right = "Ln " + std::to_string(view.cursorRow + 1) + ", Col " +
-                              std::to_string(view.cursorCol + 1) + " ";
+    const std::string name = view.fileName.empty() ? "[No Name]" : view.fileName;
+    const std::string left = " " + view.mode + " | " + name + (view.modified ? " [+]" : "");
+    const std::string right =
+        "Ln " + std::to_string(view.line + 1) + ", Col " + std::to_string(view.col + 1) + " ";
     out += "\x1b[7m";
     out += fitWidth(left, right, size.cols);
     out += "\x1b[m\r\n";
@@ -67,8 +82,14 @@ std::string renderFrame(Size size, const ViewState& view) {
     out += msg;
     out += "\x1b[K";
 
-    out += "\x1b[" + std::to_string(view.cursorRow + 1) + ";" + std::to_string(view.cursorCol + 1) +
-           "H";
+    int cursorRow = view.cursorRow + 1;
+    int cursorCol = view.cursorCol + 1;
+    if (view.commandLine) {
+        cursorRow = size.rows;
+        cursorCol = std::min(static_cast<int>(msg.size()) + 1, std::max(size.cols, 1));
+    }
+
+    out += "\x1b[" + std::to_string(cursorRow) + ";" + std::to_string(cursorCol) + "H";
     out += "\x1b[?25h";
     return out;
 }
