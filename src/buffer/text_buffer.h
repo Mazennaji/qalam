@@ -4,6 +4,9 @@
 #include <string>
 #include <vector>
 
+#include "buffer/edit.h"
+#include "buffer/pos.h"
+
 namespace qalam {
 
     class TextBuffer {
@@ -19,6 +22,9 @@ namespace qalam {
         virtual void splitLine(std::size_t row, std::size_t col) = 0;
         virtual void joinLines(std::size_t row) = 0;
         virtual void insertLine(std::size_t index, std::string text) = 0;
+
+        virtual std::string text(Pos start, Pos end) const = 0;
+        virtual Edit replace(Pos start, Pos end, const std::string& inserted) = 0;
     };
 
 }
