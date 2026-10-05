@@ -29,6 +29,8 @@ add_executable(qalam
         src/render/render.h
         src/editor/editor.cpp
         src/editor/editor.h
+        src/undo/history.cpp
+        src/undo/history.h
 )
 
 target_include_directories(qalam PRIVATE src)
