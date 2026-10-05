@@ -21,6 +21,9 @@ namespace qalam {
         void joinLines(std::size_t row) override;
         void insertLine(std::size_t index, std::string text) override;
 
+        std::string text(Pos start, Pos end) const override;
+        Edit replace(Pos start, Pos end, const std::string& inserted) override;
+
     private:
         std::vector<std::string> lines_;
     };
