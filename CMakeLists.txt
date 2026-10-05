@@ -16,6 +16,8 @@ add_executable(qalam
         src/terminal/terminal.h
         src/text/columns.cpp
         src/text/columns.h
+        src/buffer/pos.h
+        src/buffer/edit.h
         src/buffer/text_buffer.h
         src/buffer/line_buffer.cpp
         src/buffer/line_buffer.h
