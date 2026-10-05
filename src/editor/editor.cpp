@@ -108,6 +108,17 @@ void Editor::handleNormalKey(const Key& key) {
     const bool wasPendingG = pendingG_;
     pendingG_ = false;
 
+    if (pendingFind_ != 0) {
+        const char kind = pendingFind_;
+        pendingFind_ = 0;
+        if (key.type == KeyType::Char) {
+            startFind(kind, key.ch);
+        } else if (key.type == KeyType::Tab) {
+            startFind(kind, '\t');
+        }
+        return;
+    }
+
     switch (key.type) {
         case KeyType::Up: moveUp(); return;
         case KeyType::Down: moveDown(); return;
@@ -122,6 +133,8 @@ void Editor::handleNormalKey(const Key& key) {
         default: return;
     }
 
+    const Pos here{row_, col_};
+
     switch (key.ch) {
         case 'h': moveLeft(); break;
         case 'j': moveDown(); break;
@@ -129,6 +142,20 @@ void Editor::handleNormalKey(const Key& key) {
         case 'l': moveRight(); break;
         case '0': moveToLineStart(); break;
         case '$': moveToLineEnd(); break;
+        case '^': jumpTo(firstNonBlank(*buffer_, here)); break;
+        case 'w': jumpTo(wordForward(*buffer_, here, 1)); break;
+        case 'b': jumpTo(wordBackward(*buffer_, here, 1)); break;
+        case 'e': jumpTo(wordEnd(*buffer_, here, 1)); break;
+        case '}': jumpTo(paragraphForward(*buffer_, here, 1)); break;
+        case '{': jumpTo(paragraphBackward(*buffer_, here, 1)); break;
+        case 'f':
+        case 'F':
+        case 't':
+        case 'T':
+            pendingFind_ = key.ch;
+            break;
+        case ';': repeatFind(false); break;
+        case ',': repeatFind(true); break;
         case 'G': moveToLine(buffer_->lineCount() - 1); break;
         case 'g':
             if (wasPendingG) {
@@ -145,7 +172,7 @@ void Editor::handleNormalKey(const Key& key) {
             enterInsert();
             break;
         case 'I':
-            col_ = firstNonBlank(row_);
+            col_ = firstNonBlank(*buffer_, {row_, 0}).target.col;
             enterInsert();
             break;
         case 'A':
@@ -378,6 +405,46 @@ void Editor::pageDown() {
     applyWantedColumn();
 }
 
+void Editor::jumpTo(const Motion& motion) {
+    row_ = std::min(motion.target.row, buffer_->lineCount() - 1);
+    col_ = std::min(motion.target.col, maxColumn(row_));
+    wantedCol_ = col_;
+}
+
+void Editor::startFind(char kind, char ch) {
+    FindState find;
+    find.ch = ch;
+    find.forward = kind == 'f' || kind == 't';
+    find.till = kind == 't' || kind == 'T';
+    find.valid = true;
+    lastFind_ = find;
+    runFind(find, false);
+}
+
+void Editor::repeatFind(bool reverse) {
+    if (!lastFind_.valid) return;
+    FindState find = lastFind_;
+    if (reverse) find.forward = !find.forward;
+    runFind(find, true);
+}
+
+void Editor::runFind(const FindState& find, bool repeat) {
+    Pos start{row_, col_};
+    if (repeat && find.till) {
+        if (find.forward) {
+            ++start.col;
+        } else if (start.col > 0) {
+            --start.col;
+        } else {
+            return;
+        }
+    }
+
+    const std::optional<Motion> motion =
+        findChar(*buffer_, start, find.ch, find.forward, find.till, 1);
+    if (motion) jumpTo(*motion);
+}
+
 void Editor::applyWantedColumn() {
     col_ = std::min(wantedCol_, maxColumn(row_));
 }
@@ -397,12 +464,6 @@ std::size_t Editor::maxColumn(std::size_t row) const {
     const std::size_t length = buffer_->line(row).size();
     if (mode_ == Mode::Insert) return length;
     return length == 0 ? 0 : length - 1;
-}
-
-std::size_t Editor::firstNonBlank(std::size_t row) const {
-    const std::string& text = buffer_->line(row);
-    const auto pos = text.find_first_not_of(" \t");
-    return pos == std::string::npos ? text.size() : pos;
 }
 
 std::size_t Editor::textRows() const {
