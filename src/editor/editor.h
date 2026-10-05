@@ -10,7 +10,7 @@
 
 namespace qalam {
 
-    enum class Mode { Normal, Command };
+    enum class Mode { Normal, Insert, Command };
 
     class Editor {
     public:
@@ -24,10 +24,20 @@ namespace qalam {
 
     private:
         void handleNormalKey(const Key& key);
+        void handleInsertKey(const Key& key);
         void handleCommandKey(const Key& key);
         void runCommand(const std::string& text);
         bool save(const std::string& argument);
         void requestQuit(bool force);
+
+        void enterInsert();
+        void leaveInsert();
+        void insertText(char c);
+        void insertNewline();
+        void backspace();
+        void deleteForward();
+        void deleteUnderCursor();
+        void openLine(std::size_t index);
 
         void moveLeft();
         void moveRight();
@@ -42,6 +52,7 @@ namespace qalam {
         void applyWantedColumn();
         void scroll();
         std::size_t maxColumn(std::size_t row) const;
+        std::size_t firstNonBlank(std::size_t row) const;
         std::size_t textRows() const;
         int renderColumn() const;
 
