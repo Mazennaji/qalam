@@ -13,6 +13,12 @@ namespace {
 
 constexpr std::size_t kEnd = std::numeric_limits<std::size_t>::max();
 
+struct Range {
+    Pos start;
+    Pos end;
+    bool linewise;
+};
+
 std::string trim(const std::string& s) {
     const auto first = s.find_first_not_of(" \t");
     if (first == std::string::npos) return "";
@@ -26,6 +32,25 @@ std::size_t countLines(const TextBuffer& buffer, std::size_t bytes) {
 
 std::string describe(const std::string& path, std::size_t lines, std::size_t bytes) {
     return "\"" + path + "\" " + std::to_string(lines) + "L, " + std::to_string(bytes) + "B";
+}
+
+Range makeRange(const TextBuffer& buffer, Pos from, const Motion& motion) {
+    Pos a = from;
+    Pos b = motion.target;
+    if (b < a) std::swap(a, b);
+    if (motion.linewise) return {a, b, true};
+
+    if (motion.inclusive) {
+        b.col = std::min(b.col + 1, buffer.line(b.row).size());
+        return {a, b, false};
+    }
+
+    if (b.col == 0 && b.row > a.row) {
+        --b.row;
+        if (a.col <= firstNonBlank(buffer, a).target.col) return {a, b, true};
+        b.col = buffer.line(b.row).size();
+    }
+    return {a, b, false};
 }
 
 }
@@ -53,6 +78,8 @@ void Editor::open(const std::string& path) {
     wantedCol_ = 0;
     rowOff_ = 0;
     colOff_ = 0;
+    pendingOp_ = 0;
+    pendingFind_ = 0;
     modified_ = false;
     scroll();
 }
@@ -94,6 +121,7 @@ ViewState Editor::view() const {
     v.modified = modified_;
     v.commandLine = mode_ == Mode::Command;
     v.message = v.commandLine ? ":" + commandText_ : message_;
+    if (mode_ == Mode::Normal && pendingOp_ != 0) v.message = std::string(1, pendingOp_);
     v.showWelcome = path_.empty() && buffer_->lineCount() == 1 && buffer_->line(0).empty();
     v.rowOffset = rowOff_;
     v.colOffset = colOff_;
@@ -115,7 +143,19 @@ void Editor::handleNormalKey(const Key& key) {
             startFind(kind, key.ch);
         } else if (key.type == KeyType::Tab) {
             startFind(kind, '\t');
+        } else {
+            pendingOp_ = 0;
         }
+        return;
+    }
+
+    if (key.type == KeyType::Escape) {
+        pendingOp_ = 0;
+        return;
+    }
+
+    if (pendingOp_ != 0) {
+        handleOperatorKey(key, wasPendingG);
         return;
     }
 
@@ -164,6 +204,28 @@ void Editor::handleNormalKey(const Key& key) {
                 pendingG_ = true;
             }
             break;
+        case 'd':
+        case 'c':
+        case 'y':
+            pendingOp_ = key.ch;
+            break;
+        case 'D': operate('d', lineEnd(*buffer_, here)); break;
+        case 'C': operate('c', lineEnd(*buffer_, here)); break;
+        case 'Y': operate('y', gotoLine(*buffer_, row_)); break;
+        case 'S': operate('c', gotoLine(*buffer_, row_)); break;
+        case 's':
+            if (const auto m = charRight(*buffer_, here, 1)) {
+                operate('c', *m);
+            } else {
+                enterInsert();
+            }
+            break;
+        case 'X':
+            if (const auto m = charLeft(here, 1)) operate('d', *m);
+            break;
+        case 'x': deleteUnderCursor(); break;
+        case 'p': put(true); break;
+        case 'P': put(false); break;
         case 'i':
             enterInsert();
             break;
@@ -181,13 +243,45 @@ void Editor::handleNormalKey(const Key& key) {
             break;
         case 'o': openLine(row_ + 1); break;
         case 'O': openLine(row_); break;
-        case 'x': deleteUnderCursor(); break;
         case ':':
             mode_ = Mode::Command;
             commandText_.clear();
             break;
         default: break;
     }
+}
+
+void Editor::handleOperatorKey(const Key& key, bool wasPendingG) {
+    const char op = pendingOp_;
+
+    if (key.type == KeyType::Char) {
+        if (!wasPendingG && key.ch == op) {
+            operate(op, gotoLine(*buffer_, row_));
+            return;
+        }
+        switch (key.ch) {
+            case 'g':
+                if (!wasPendingG) {
+                    pendingG_ = true;
+                    return;
+                }
+                break;
+            case 'f':
+            case 'F':
+            case 't':
+            case 'T':
+                pendingFind_ = key.ch;
+                return;
+            default: break;
+        }
+    }
+
+    const std::optional<Motion> motion = operatorMotion(key, wasPendingG);
+    if (!motion) {
+        pendingOp_ = 0;
+        return;
+    }
+    operate(op, *motion);
 }
 
 void Editor::handleInsertKey(const Key& key) {
@@ -344,11 +438,7 @@ void Editor::deleteForward() {
 }
 
 void Editor::deleteUnderCursor() {
-    if (buffer_->line(row_).empty()) return;
-    buffer_->eraseChar(row_, col_);
-    col_ = std::min(col_, maxColumn(row_));
-    wantedCol_ = col_;
-    modified_ = true;
+    if (const auto motion = charRight(*buffer_, {row_, col_}, 1)) operate('d', *motion);
 }
 
 void Editor::openLine(std::size_t index) {
@@ -357,6 +447,144 @@ void Editor::openLine(std::size_t index) {
     col_ = 0;
     modified_ = true;
     enterInsert();
+}
+
+std::optional<Motion> Editor::operatorMotion(const Key& key, bool wasPendingG) const {
+    const Pos here{row_, col_};
+
+    switch (key.type) {
+        case KeyType::Left: return charLeft(here, 1);
+        case KeyType::Right: return charRight(*buffer_, here, 1);
+        case KeyType::Up: return lineUp(here, 1);
+        case KeyType::Down: return lineDown(*buffer_, here, 1);
+        case KeyType::Home: return lineStart(here);
+        case KeyType::End: return lineEnd(*buffer_, here);
+        case KeyType::Char: break;
+        default: return std::nullopt;
+    }
+
+    switch (key.ch) {
+        case 'h': return charLeft(here, 1);
+        case 'l': return charRight(*buffer_, here, 1);
+        case 'k': return lineUp(here, 1);
+        case 'j': return lineDown(*buffer_, here, 1);
+        case '0': return lineStart(here);
+        case '$': return lineEnd(*buffer_, here);
+        case '^': return firstNonBlank(*buffer_, here);
+        case 'w':
+            if (pendingOp_ == 'c') return changeWord(*buffer_, here, 1);
+            return wordForwardForOperator(*buffer_, here, 1);
+        case 'b': return wordBackward(*buffer_, here, 1);
+        case 'e': return wordEnd(*buffer_, here, 1);
+        case '}': return paragraphForward(*buffer_, here, 1);
+        case '{': return paragraphBackward(*buffer_, here, 1);
+        case 'G': return gotoLine(*buffer_, buffer_->lineCount() - 1);
+        case 'g':
+            if (wasPendingG) return gotoLine(*buffer_, 0);
+            return std::nullopt;
+        default: return std::nullopt;
+    }
+}
+
+void Editor::operate(char op, const Motion& motion) {
+    pendingOp_ = 0;
+    const Range range = makeRange(*buffer_, {row_, col_}, motion);
+
+    if (!range.linewise && range.start == range.end) {
+        if (op == 'c') enterInsert();
+        return;
+    }
+
+    if (range.linewise) {
+        const std::size_t last = range.end.row;
+        reg_.text =
+            buffer_->text({range.start.row, 0}, {last, buffer_->line(last).size()}) + "\n";
+        reg_.linewise = true;
+    } else {
+        reg_.text = buffer_->text(range.start, range.end);
+        reg_.linewise = false;
+    }
+
+    if (op == 'y') {
+        row_ = range.start.row;
+        if (!range.linewise) col_ = range.start.col;
+        col_ = std::min(col_, maxColumn(row_));
+        wantedCol_ = col_;
+        return;
+    }
+
+    modified_ = true;
+
+    if (range.linewise && op == 'c') {
+        const std::size_t last = range.end.row;
+        buffer_->replace({range.start.row, 0}, {last, buffer_->line(last).size()}, "");
+        row_ = range.start.row;
+        col_ = 0;
+        enterInsert();
+        return;
+    }
+
+    if (range.linewise) {
+        const std::size_t first = range.start.row;
+        const std::size_t last = range.end.row;
+        if (last + 1 < buffer_->lineCount()) {
+            buffer_->replace({first, 0}, {last + 1, 0}, "");
+        } else if (first > 0) {
+            buffer_->replace({first - 1, buffer_->line(first - 1).size()},
+                             {last, buffer_->line(last).size()}, "");
+        } else {
+            buffer_->replace({0, 0}, {last, buffer_->line(last).size()}, "");
+        }
+        row_ = std::min(first, buffer_->lineCount() - 1);
+        col_ = firstNonBlank(*buffer_, {row_, 0}).target.col;
+        col_ = std::min(col_, maxColumn(row_));
+        wantedCol_ = col_;
+        return;
+    }
+
+    buffer_->replace(range.start, range.end, "");
+    row_ = range.start.row;
+    col_ = range.start.col;
+    if (op == 'c') {
+        enterInsert();
+        return;
+    }
+    col_ = std::min(col_, maxColumn(row_));
+    wantedCol_ = col_;
+}
+
+void Editor::put(bool after) {
+    if (reg_.text.empty()) return;
+
+    if (reg_.linewise) {
+        std::string body = reg_.text;
+        if (!body.empty() && body.back() == '\n') body.pop_back();
+
+        if (!after) {
+            buffer_->replace({row_, 0}, {row_, 0}, body + "\n");
+        } else if (row_ + 1 < buffer_->lineCount()) {
+            buffer_->replace({row_ + 1, 0}, {row_ + 1, 0}, body + "\n");
+            ++row_;
+        } else {
+            const std::size_t length = buffer_->line(row_).size();
+            buffer_->replace({row_, length}, {row_, length}, "\n" + body);
+            ++row_;
+        }
+        col_ = firstNonBlank(*buffer_, {row_, 0}).target.col;
+    } else {
+        const std::size_t length = buffer_->line(row_).size();
+        const std::size_t at = after && length > 0 ? std::min(col_ + 1, length) : col_;
+        buffer_->replace({row_, at}, {row_, at}, reg_.text);
+        if (reg_.text.find('\n') == std::string::npos) {
+            col_ = at + reg_.text.size() - 1;
+        } else {
+            col_ = at;
+        }
+    }
+
+    col_ = std::min(col_, maxColumn(row_));
+    wantedCol_ = col_;
+    modified_ = true;
 }
 
 void Editor::moveLeft() {
@@ -436,12 +664,19 @@ void Editor::runFind(const FindState& find, bool repeat) {
         } else if (start.col > 0) {
             --start.col;
         } else {
+            pendingOp_ = 0;
             return;
         }
     }
 
     const std::optional<Motion> motion =
         findChar(*buffer_, start, find.ch, find.forward, find.till, 1);
+
+    if (motion && pendingOp_ != 0) {
+        operate(pendingOp_, *motion);
+        return;
+    }
+    pendingOp_ = 0;
     if (motion) jumpTo(*motion);
 }
 
