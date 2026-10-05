@@ -21,6 +21,8 @@ add_executable(qalam
         src/buffer/line_buffer.h
         src/buffer/file_io.cpp
         src/buffer/file_io.h
+        src/motions/motions.cpp
+        src/motions/motions.h
         src/render/render.cpp
         src/render/render.h
         src/editor/editor.cpp
