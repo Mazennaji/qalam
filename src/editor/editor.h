@@ -8,12 +8,13 @@
 #include "buffer/text_buffer.h"
 #include "motions/motions.h"
 #include "render/render.h"
+#include "search/search.h"
 #include "terminal/terminal.h"
 #include "undo/history.h"
 
 namespace qalam {
 
-enum class Mode { Normal, Insert, Command };
+enum class Mode { Normal, Insert, Command, Search };
 
 class Editor {
 public:
@@ -42,9 +43,18 @@ private:
     void handleOperatorKey(const Key& key, bool wasPendingG);
     void handleInsertKey(const Key& key);
     void handleCommandKey(const Key& key);
+    void handleSearchKey(const Key& key);
     void runCommand(const std::string& text);
     bool save(const std::string& argument);
     void requestQuit(bool force);
+
+    void beginSearch(bool forward);
+    void previewSearch();
+    void cancelSearch();
+    void commitSearch();
+    void findNext(bool reverse, int count);
+    void substitute(std::size_t first, std::size_t last, std::string pattern,
+                    const std::string& replacement, bool global, CaseMode mode);
 
     void enterInsert();
     void leaveInsert();
@@ -96,8 +106,11 @@ private:
     std::string path_;
     std::string message_;
     std::string commandText_;
+    std::string searchText_;
+    std::string lastSearch_;
     Mode mode_ = Mode::Normal;
     Size size_{24, 80};
+    Pos searchOrigin_;
     std::size_t row_ = 0;
     std::size_t col_ = 0;
     std::size_t wantedCol_ = 0;
@@ -109,6 +122,9 @@ private:
     int opCount_ = 0;
     char pendingFind_ = 0;
     char pendingOp_ = 0;
+    bool searchForward_ = true;
+    bool lastForward_ = true;
+    bool highlight_ = false;
     bool pendingG_ = false;
     bool quit_ = false;
 };
