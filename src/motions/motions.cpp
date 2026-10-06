@@ -4,6 +4,8 @@
 #include <cctype>
 #include <string>
 
+#include "text/columns.h"
+
 namespace qalam {
 namespace {
 
@@ -15,7 +17,7 @@ int charClass(char c) {
 }
 
 std::size_t lastColumn(const std::string& line) {
-    return line.empty() ? 0 : line.size() - 1;
+    return prevCharStart(line, line.size());
 }
 
 Pos nextWordStart(const TextBuffer& buffer, Pos p, bool& hitEnd) {
@@ -64,14 +66,23 @@ Pos prevWordStart(const TextBuffer& buffer, Pos p) {
 
 bool advance(const TextBuffer& buffer, Pos& p) {
     const std::string& line = buffer.line(p.row);
-    if (p.col + 1 < line.size()) {
-        ++p.col;
+    const std::size_t next = p.col + charLength(line, p.col);
+    if (next < line.size()) {
+        p.col = next;
         return true;
     }
     if (p.row + 1 >= buffer.lineCount()) return false;
     ++p.row;
     p.col = 0;
     return true;
+}
+
+void extendWithinWord(const std::string& line, std::size_t& col, int cls) {
+    while (true) {
+        const std::size_t next = col + charLength(line, col);
+        if (next >= line.size() || charClass(line[next]) != cls) return;
+        col = next;
+    }
 }
 
 Pos nextWordEnd(const TextBuffer& buffer, Pos p) {
@@ -84,8 +95,7 @@ Pos nextWordEnd(const TextBuffer& buffer, Pos p) {
     }
 
     const std::string& line = buffer.line(p.row);
-    const int cls = charClass(line[p.col]);
-    while (p.col + 1 < line.size() && charClass(line[p.col + 1]) == cls) ++p.col;
+    extendWithinWord(line, p.col, charClass(line[p.col]));
     return p;
 }
 
@@ -135,9 +145,8 @@ Motion changeWord(const TextBuffer& buffer, Pos from, int count) {
         return wordForwardForOperator(buffer, from, count);
     }
 
-    const int cls = charClass(line[from.col]);
     Pos p = from;
-    while (p.col + 1 < line.size() && charClass(line[p.col + 1]) == cls) ++p.col;
+    extendWithinWord(line, p.col, charClass(line[from.col]));
     for (int i = 1; i < count; ++i) p = nextWordEnd(buffer, p);
     return {p, false, true};
 }
@@ -168,17 +177,22 @@ Motion paragraphBackward(const TextBuffer& buffer, Pos from, int count) {
     return {from, false, false};
 }
 
-std::optional<Motion> charLeft(Pos from, int count) {
+std::optional<Motion> charLeft(const TextBuffer& buffer, Pos from, int count) {
     if (from.col == 0) return std::nullopt;
-    const auto n = static_cast<std::size_t>(count);
-    return Motion{{from.row, from.col > n ? from.col - n : 0}, false, false};
+
+    const std::string& line = buffer.line(from.row);
+    std::size_t col = from.col;
+    for (int i = 0; i < count && col > 0; ++i) col = prevCharStart(line, col);
+    return Motion{{from.row, col}, false, false};
 }
 
 std::optional<Motion> charRight(const TextBuffer& buffer, Pos from, int count) {
-    const std::size_t length = buffer.line(from.row).size();
-    if (from.col >= length) return std::nullopt;
-    const auto n = static_cast<std::size_t>(count);
-    return Motion{{from.row, std::min(from.col + n, length)}, false, false};
+    const std::string& line = buffer.line(from.row);
+    if (from.col >= line.size()) return std::nullopt;
+
+    std::size_t col = from.col;
+    for (int i = 0; i < count && col < line.size(); ++i) col += charLength(line, col);
+    return Motion{{from.row, col}, false, false};
 }
 
 std::optional<Motion> lineUp(Pos from, int count) {
@@ -205,22 +219,24 @@ Motion gotoLine(const TextBuffer& buffer, std::size_t row) {
     return {{std::min(row, buffer.lineCount() - 1), 0}, true, false};
 }
 
-std::optional<Motion> findChar(const TextBuffer& buffer, Pos from, char ch, bool forward,
-                               bool till, int count) {
+std::optional<Motion> findChar(const TextBuffer& buffer, Pos from, const std::string& target,
+                               bool forward, bool till, int count) {
+    if (target.empty()) return std::nullopt;
+
     const std::string& line = buffer.line(from.row);
     std::size_t i = from.col;
 
     for (int n = 0; n < count; ++n) {
         if (forward) {
-            i = line.find(ch, i + 1);
+            i = line.find(target, i + 1);
         } else {
             if (i == 0) return std::nullopt;
-            i = line.rfind(ch, i - 1);
+            i = line.rfind(target, i - 1);
         }
         if (i == std::string::npos) return std::nullopt;
     }
 
-    if (till) i = forward ? i - 1 : i + 1;
+    if (till) i = forward ? prevCharStart(line, i) : i + target.size();
     return Motion{{from.row, i}, false, forward};
 }
 
