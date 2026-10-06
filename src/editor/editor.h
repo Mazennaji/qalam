@@ -34,7 +34,7 @@ public:
 
 private:
     struct FindState {
-        char ch = 0;
+        std::string target;
         bool forward = true;
         bool till = false;
         bool valid = false;
@@ -52,7 +52,15 @@ private:
         std::size_t top = 0;
         std::size_t bottom = 0;
         std::size_t col = 0;
+        std::size_t dcol = 0;
         std::size_t oldLen = 0;
+    };
+
+    struct BlockBounds {
+        std::size_t top = 0;
+        std::size_t bottom = 0;
+        std::size_t left = 0;
+        std::size_t right = 0;
     };
 
     void dispatch(const Key& key);
@@ -76,6 +84,7 @@ private:
     void blockInsert(bool append);
     void finishBlockInsert();
     void visualPut();
+    BlockBounds blockBounds() const;
 
     void beginSearch(bool forward);
     void previewSearch();
@@ -87,7 +96,7 @@ private:
 
     void enterInsert();
     void leaveInsert();
-    void insertText(char c);
+    void insertString(const std::string& text);
     void insertNewline();
     void backspace();
     void deleteForward();
@@ -121,10 +130,11 @@ private:
     void pageDown();
     void jumpTo(const Motion& motion);
 
-    void startFind(char kind, char ch);
+    void startFind(char kind, const std::string& target);
     void repeatFind(bool reverse, int count);
     void runFind(const FindState& find, bool repeat, int count);
 
+    void rememberColumn();
     void applyWantedColumn();
     void scroll();
     std::size_t maxColumn(std::size_t row) const;
