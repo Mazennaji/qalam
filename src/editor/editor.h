@@ -42,7 +42,17 @@ private:
 
     struct Register {
         std::string text;
+        std::vector<std::string> rows;
         bool linewise = false;
+        bool block = false;
+    };
+
+    struct BlockInsert {
+        bool active = false;
+        std::size_t top = 0;
+        std::size_t bottom = 0;
+        std::size_t col = 0;
+        std::size_t oldLen = 0;
     };
 
     void dispatch(const Key& key);
@@ -62,6 +72,9 @@ private:
     void enterVisual(char kind);
     void leaveVisual();
     void operateVisual(char op, bool forceLine);
+    void operateBlock(char op);
+    void blockInsert(bool append);
+    void finishBlockInsert();
     void visualPut();
 
     void beginSearch(bool forward);
@@ -95,6 +108,7 @@ private:
                                          bool counted) const;
     void operate(char op, const Motion& motion);
     void put(bool after, int count);
+    void putBlock(bool after, int count);
 
     void moveLeft(std::size_t n = 1);
     void moveRight(std::size_t n = 1);
@@ -139,6 +153,7 @@ private:
     int colOff_ = 0;
     FindState lastFind_;
     Register reg_;
+    BlockInsert blockInsert_;
     int count_ = 0;
     int opCount_ = 0;
     int mapTicks_ = 0;
