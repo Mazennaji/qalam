@@ -1,11 +1,15 @@
 #pragma once
 
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "buffer/text_buffer.h"
+#include "config/config.h"
+#include "input/keymap.h"
 #include "motions/motions.h"
 #include "render/render.h"
 #include "search/search.h"
@@ -21,8 +25,10 @@ public:
     explicit Editor(std::unique_ptr<TextBuffer> buffer);
 
     void open(const std::string& path);
+    bool useConfig(const std::string& path);
     void resize(Size size);
     void handleKey(const Key& key);
+    bool idle();
     bool shouldQuit() const;
     ViewState view() const;
 
@@ -38,6 +44,10 @@ private:
         std::string text;
         bool linewise = false;
     };
+
+    void dispatch(const Key& key);
+    void resolveMaps(bool timedOut);
+    bool canMap() const;
 
     void handleNormalKey(const Key& key);
     void handleOperatorKey(const Key& key, bool wasPendingG);
@@ -109,6 +119,10 @@ private:
 
     std::unique_ptr<TextBuffer> buffer_;
     UndoHistory history_;
+    Keymap keymap_;
+    std::map<std::string, std::string> aliases_;
+    std::vector<Key> mapPending_;
+    std::string configPath_;
     std::string path_;
     std::string message_;
     std::string commandText_;
@@ -127,6 +141,8 @@ private:
     Register reg_;
     int count_ = 0;
     int opCount_ = 0;
+    int mapTicks_ = 0;
+    int timeoutTicks_ = 5;
     char visualKind_ = 'v';
     char pendingFind_ = 0;
     char pendingOp_ = 0;
