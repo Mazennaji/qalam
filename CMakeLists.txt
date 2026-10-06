@@ -31,6 +31,12 @@ add_executable(qalam
         src/search/substitute.h
         src/undo/history.cpp
         src/undo/history.h
+        src/input/key_notation.cpp
+        src/input/key_notation.h
+        src/input/keymap.cpp
+        src/input/keymap.h
+        src/config/config.cpp
+        src/config/config.h
         src/render/render.cpp
         src/render/render.h
         src/editor/editor.cpp
