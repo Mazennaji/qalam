@@ -25,12 +25,16 @@ add_executable(qalam
         src/buffer/file_io.h
         src/motions/motions.cpp
         src/motions/motions.h
+        src/search/search.cpp
+        src/search/search.h
+        src/search/substitute.cpp
+        src/search/substitute.h
+        src/undo/history.cpp
+        src/undo/history.h
         src/render/render.cpp
         src/render/render.h
         src/editor/editor.cpp
         src/editor/editor.h
-        src/undo/history.cpp
-        src/undo/history.h
 )
 
 target_include_directories(qalam PRIVATE src)
