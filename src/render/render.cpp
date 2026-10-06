@@ -58,7 +58,10 @@ void appendTextRow(std::string& out, const std::string& line, std::size_t row, i
     std::size_t selFrom = 0;
     std::size_t selTo = 0;
     if (selected) {
-        if (selection->linewise) {
+        if (selection->block) {
+            selFrom = static_cast<std::size_t>(displayColumn(line, selection->left));
+            selTo = static_cast<std::size_t>(displayColumn(line, selection->right + 1));
+        } else if (selection->linewise) {
             selTo = text.size();
         } else {
             if (row == selection->start.row) {
