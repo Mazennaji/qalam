@@ -14,7 +14,7 @@
 
 namespace qalam {
 
-enum class Mode { Normal, Insert, Command, Search };
+enum class Mode { Normal, Insert, Command, Search, Visual };
 
 class Editor {
 public:
@@ -44,9 +44,15 @@ private:
     void handleInsertKey(const Key& key);
     void handleCommandKey(const Key& key);
     void handleSearchKey(const Key& key);
+    void handleVisualKey(const Key& key);
     void runCommand(const std::string& text);
     bool save(const std::string& argument);
     void requestQuit(bool force);
+
+    void enterVisual(char kind);
+    void leaveVisual();
+    void operateVisual(char op, bool forceLine);
+    void visualPut();
 
     void beginSearch(bool forward);
     void previewSearch();
@@ -111,6 +117,7 @@ private:
     Mode mode_ = Mode::Normal;
     Size size_{24, 80};
     Pos searchOrigin_;
+    Pos anchor_;
     std::size_t row_ = 0;
     std::size_t col_ = 0;
     std::size_t wantedCol_ = 0;
@@ -120,6 +127,7 @@ private:
     Register reg_;
     int count_ = 0;
     int opCount_ = 0;
+    char visualKind_ = 'v';
     char pendingFind_ = 0;
     char pendingOp_ = 0;
     bool searchForward_ = true;
