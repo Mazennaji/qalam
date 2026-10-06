@@ -2,13 +2,25 @@
 
 #include <cstddef>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace qalam {
 
     constexpr int kTabStop = 4;
 
-    int displayColumn(const std::string& line, std::size_t index);
+    std::size_t charLength(const std::string& line, std::size_t index);
+    std::size_t prevCharStart(const std::string& line, std::size_t index);
+    std::size_t snapToStart(const std::string& line, std::size_t index);
 
-    std::string expandTabs(const std::string& line);
+    int displayColumn(const std::string& line, std::size_t index);
+    int displayWidth(const std::string& line);
+    std::size_t byteForColumn(const std::string& line, std::size_t column);
+    std::pair<std::size_t, std::size_t> byteSpan(const std::string& line, std::size_t left,
+                                                 std::size_t right);
+
+    std::string truncateToWidth(const std::string& text, std::size_t width);
+    std::vector<std::string> displayCells(const std::string& line);
+    void popLastChar(std::string& text);
 
 }
