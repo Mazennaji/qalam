@@ -66,7 +66,8 @@ Range makeRange(const TextBuffer& buffer, Pos from, const Motion& motion) {
     if (motion.linewise) return {a, b, true};
 
     if (motion.inclusive) {
-        b.col = std::min(b.col + 1, buffer.line(b.row).size());
+        const std::string& line = buffer.line(b.row);
+        b.col = std::min(b.col + charLength(line, b.col), line.size());
         return {a, b, false};
     }
 
@@ -343,9 +344,10 @@ ViewState Editor::view() const {
         if (b < a) std::swap(a, b);
         Selection selection{a, b, visualKind_ == 'V'};
         if (visualKind_ == 'B') {
+            const BlockBounds bounds = blockBounds();
             selection.block = true;
-            selection.left = std::min(anchor_.col, col_);
-            selection.right = std::max(anchor_.col, col_);
+            selection.left = bounds.left;
+            selection.right = bounds.right;
         }
         v.selection = selection;
     }
@@ -353,7 +355,7 @@ ViewState Editor::view() const {
     v.rowOffset = rowOff_;
     v.colOffset = colOff_;
     v.line = row_;
-    v.col = col_;
+    v.col = static_cast<std::size_t>(renderColumn());
     v.cursorRow = static_cast<int>(row_ - rowOff_);
     v.cursorCol = renderColumn() - colOff_;
     return v;
@@ -367,9 +369,11 @@ void Editor::handleNormalKey(const Key& key) {
         const char kind = pendingFind_;
         pendingFind_ = 0;
         if (key.type == KeyType::Char) {
-            startFind(kind, key.ch);
+            startFind(kind, std::string(1, key.ch));
         } else if (key.type == KeyType::Tab) {
-            startFind(kind, '\t');
+            startFind(kind, "\t");
+        } else if (key.type == KeyType::Text) {
+            startFind(kind, key.text);
         } else {
             resetPending();
         }
@@ -476,7 +480,7 @@ void Editor::handleNormalKey(const Key& key) {
             }
             break;
         case 'X':
-            if (const auto m = charLeft(here, n)) operate('d', *m);
+            if (const auto m = charLeft(*buffer_, here, n)) operate('d', *m);
             break;
         case 'x': deleteUnderCursor(n); break;
         case 'p': put(true, n); break;
@@ -487,10 +491,12 @@ void Editor::handleNormalKey(const Key& key) {
         case 'i':
             enterInsert();
             break;
-        case 'a':
-            col_ = buffer_->line(row_).empty() ? 0 : col_ + 1;
+        case 'a': {
+            const std::string& line = buffer_->line(row_);
+            col_ = line.empty() ? 0 : col_ + charLength(line, col_);
             enterInsert();
             break;
+        }
         case 'I':
             col_ = firstNonBlank(*buffer_, {row_, 0}).target.col;
             enterInsert();
@@ -641,7 +647,7 @@ void Editor::handleVisualKey(const Key& key) {
             row_ = anchor_.row;
             col_ = anchor_.col;
             anchor_ = cursor;
-            wantedCol_ = col_;
+            rememberColumn();
             return;
         }
         case 'I':
@@ -692,8 +698,9 @@ void Editor::handleInsertKey(const Key& key) {
 
     switch (key.type) {
         case KeyType::Escape: leaveInsert(); break;
-        case KeyType::Char: insertText(key.ch); break;
-        case KeyType::Tab: insertText('\t'); break;
+        case KeyType::Char: insertString(std::string(1, key.ch)); break;
+        case KeyType::Text: insertString(key.text); break;
+        case KeyType::Tab: insertString("\t"); break;
         case KeyType::Enter: insertNewline(); break;
         case KeyType::Backspace: backspace(); break;
         case KeyType::Delete: deleteForward(); break;
@@ -714,11 +721,14 @@ void Editor::handleCommandKey(const Key& key) {
         case KeyType::Char:
             commandText_ += key.ch;
             break;
+        case KeyType::Text:
+            commandText_ += key.text;
+            break;
         case KeyType::Backspace:
             if (commandText_.empty()) {
                 mode_ = Mode::Normal;
             } else {
-                commandText_.pop_back();
+                popLastChar(commandText_);
             }
             break;
         case KeyType::Escape:
@@ -742,6 +752,10 @@ void Editor::handleSearchKey(const Key& key) {
             searchText_ += key.ch;
             previewSearch();
             break;
+        case KeyType::Text:
+            searchText_ += key.text;
+            previewSearch();
+            break;
         case KeyType::Tab:
             searchText_ += '\t';
             previewSearch();
@@ -750,7 +764,7 @@ void Editor::handleSearchKey(const Key& key) {
             if (searchText_.empty()) {
                 cancelSearch();
             } else {
-                searchText_.pop_back();
+                popLastChar(searchText_);
                 previewSearch();
             }
             break;
@@ -854,6 +868,26 @@ void Editor::leaveVisual() {
     col_ = std::min(col_, maxColumn(row_));
 }
 
+Editor::BlockBounds Editor::blockBounds() const {
+    auto edges = [&](Pos p) {
+        const std::string& line = buffer_->line(p.row);
+        const auto start = static_cast<std::size_t>(displayColumn(line, p.col));
+        const std::size_t length = charLength(line, p.col);
+        const auto finish = static_cast<std::size_t>(displayColumn(line, p.col + length));
+        return std::pair<std::size_t, std::size_t>{start, finish > start ? finish - 1 : start};
+    };
+
+    const auto a = edges(anchor_);
+    const auto b = edges({row_, col_});
+
+    BlockBounds bounds;
+    bounds.top = std::min(anchor_.row, row_);
+    bounds.bottom = std::max(anchor_.row, row_);
+    bounds.left = std::min(a.first, b.first);
+    bounds.right = std::max(a.second, b.second);
+    return bounds;
+}
+
 void Editor::operateVisual(char op, bool forceLine) {
     if (visualKind_ == 'B' && !forceLine) {
         operateBlock(op);
@@ -876,63 +910,61 @@ void Editor::operateVisual(char op, bool forceLine) {
 void Editor::operateBlock(char op) {
     takeCount();
 
-    const std::size_t top = std::min(anchor_.row, row_);
-    const std::size_t bottom = std::max(anchor_.row, row_);
-    const std::size_t left = std::min(anchor_.col, col_);
-    const std::size_t right = std::max(anchor_.col, col_);
+    const BlockBounds bounds = blockBounds();
 
     reg_.rows.clear();
     reg_.text.clear();
-    for (std::size_t r = top; r <= bottom; ++r) {
+    std::vector<std::pair<std::size_t, std::size_t>> spans;
+    for (std::size_t r = bounds.top; r <= bounds.bottom; ++r) {
         const std::string& line = buffer_->line(r);
-        reg_.rows.push_back(left < line.size() ? line.substr(left, right - left + 1) : "");
-        if (r > top) reg_.text += '\n';
+        const auto span = byteSpan(line, bounds.left, bounds.right);
+        spans.push_back(span);
+        reg_.rows.push_back(line.substr(span.first, span.second - span.first));
+        if (r > bounds.top) reg_.text += '\n';
         reg_.text += reg_.rows.back();
     }
     reg_.linewise = false;
     reg_.block = true;
 
     mode_ = Mode::Normal;
-    row_ = top;
-    col_ = left;
+    row_ = bounds.top;
+    col_ = spans.front().first;
 
     if (op == 'y') {
         col_ = std::min(col_, maxColumn(row_));
-        wantedCol_ = col_;
+        rememberColumn();
         return;
     }
 
-    for (std::size_t r = top; r <= bottom; ++r) {
-        const std::size_t length = buffer_->line(r).size();
-        if (left < length) applyEdit({r, left}, {r, std::min(right + 1, length)}, "");
+    for (std::size_t r = bounds.top; r <= bounds.bottom; ++r) {
+        const auto span = spans[r - bounds.top];
+        if (span.second > span.first) applyEdit({r, span.first}, {r, span.second}, "");
     }
 
     if (op == 'c') {
-        const std::size_t length = buffer_->line(top).size();
-        col_ = std::min(left, length);
+        const std::size_t length = buffer_->line(bounds.top).size();
+        col_ = std::min(spans.front().first, length);
         enterInsert();
-        blockInsert_ = {true, top, bottom, col_, length};
+        blockInsert_ = {true, bounds.top, bounds.bottom, col_, bounds.left, length};
         return;
     }
 
-    col_ = std::min(left, maxColumn(row_));
-    wantedCol_ = col_;
+    col_ = std::min(col_, maxColumn(row_));
+    rememberColumn();
 }
 
 void Editor::blockInsert(bool append) {
     takeCount();
 
-    const std::size_t top = std::min(anchor_.row, row_);
-    const std::size_t bottom = std::max(anchor_.row, row_);
-    const std::size_t left = std::min(anchor_.col, col_);
-    const std::size_t right = std::max(anchor_.col, col_);
+    const BlockBounds bounds = blockBounds();
+    const std::size_t dcol = append ? bounds.right + 1 : bounds.left;
 
     mode_ = Mode::Normal;
-    row_ = top;
-    const std::size_t length = buffer_->line(top).size();
-    col_ = std::min(append ? right + 1 : left, length);
+    row_ = bounds.top;
+    const std::size_t length = buffer_->line(bounds.top).size();
+    col_ = byteForColumn(buffer_->line(bounds.top), dcol);
     enterInsert();
-    blockInsert_ = {true, top, bottom, col_, length};
+    blockInsert_ = {true, bounds.top, bounds.bottom, col_, dcol, length};
 }
 
 void Editor::finishBlockInsert() {
@@ -946,9 +978,10 @@ void Editor::finishBlockInsert() {
     const std::string typed = line.substr(block.col, line.size() - block.oldLen);
     const std::size_t last = std::min(block.bottom, buffer_->lineCount() - 1);
     for (std::size_t r = block.top + 1; r <= last; ++r) {
-        if (buffer_->line(r).size() >= block.col) {
-            applyEdit({r, block.col}, {r, block.col}, typed);
-        }
+        const std::string& other = buffer_->line(r);
+        if (static_cast<std::size_t>(displayWidth(other)) < block.dcol) continue;
+        const std::size_t at = byteForColumn(other, block.dcol);
+        applyEdit({r, at}, {r, at}, typed);
     }
 }
 
@@ -966,20 +999,22 @@ void Editor::visualPut() {
     if (b < a) std::swap(a, b);
 
     if (visualKind_ == 'B') {
-        const std::size_t left = std::min(anchor_.col, col_);
+        const BlockBounds bounds = blockBounds();
         const Register previous = reg_;
         operateVisual('d', false);
         const Register deleted = reg_;
 
         reg_ = previous;
-        put(left >= buffer_->line(row_).size(), n);
+        const auto width = static_cast<std::size_t>(displayWidth(buffer_->line(row_)));
+        put(width <= bounds.left, n);
         reg_ = deleted;
         return;
     }
 
     const bool linewise = visualKind_ == 'V';
     const bool atEnd = linewise ? b.row + 1 >= buffer_->lineCount()
-                                : b.col + 1 >= buffer_->line(b.row).size();
+                                : b.col + charLength(buffer_->line(b.row), b.col) >=
+                                      buffer_->line(b.row).size();
 
     const Register previous = reg_;
     operateVisual('d', false);
@@ -1001,7 +1036,7 @@ void Editor::beginSearch(bool forward) {
 void Editor::previewSearch() {
     row_ = searchOrigin_.row;
     col_ = searchOrigin_.col;
-    wantedCol_ = col_;
+    rememberColumn();
     if (searchText_.empty()) return;
 
     const std::optional<SearchHit> hit = searchForward_
@@ -1015,7 +1050,7 @@ void Editor::cancelSearch() {
     searchText_.clear();
     row_ = searchOrigin_.row;
     col_ = searchOrigin_.col;
-    wantedCol_ = col_;
+    rememberColumn();
 }
 
 void Editor::commitSearch() {
@@ -1025,7 +1060,7 @@ void Editor::commitSearch() {
 
     row_ = searchOrigin_.row;
     col_ = searchOrigin_.col;
-    wantedCol_ = col_;
+    rememberColumn();
 
     lastForward_ = searchForward_;
     if (!pattern.empty()) lastSearch_ = pattern;
@@ -1104,21 +1139,21 @@ void Editor::substitute(std::size_t first, std::size_t last, std::string pattern
 
 void Editor::enterInsert() {
     mode_ = Mode::Insert;
-    wantedCol_ = col_;
+    rememberColumn();
 }
 
 void Editor::leaveInsert() {
     if (blockInsert_.active) finishBlockInsert();
     mode_ = Mode::Normal;
-    if (col_ > 0) --col_;
+    if (col_ > 0) col_ = prevCharStart(buffer_->line(row_), col_);
     col_ = std::min(col_, maxColumn(row_));
-    wantedCol_ = col_;
+    rememberColumn();
 }
 
-void Editor::insertText(char c) {
-    applyEdit({row_, col_}, {row_, col_}, std::string(1, c));
-    ++col_;
-    wantedCol_ = col_;
+void Editor::insertString(const std::string& text) {
+    applyEdit({row_, col_}, {row_, col_}, text);
+    col_ += text.size();
+    rememberColumn();
 }
 
 void Editor::insertNewline() {
@@ -1130,8 +1165,9 @@ void Editor::insertNewline() {
 
 void Editor::backspace() {
     if (col_ > 0) {
-        applyEdit({row_, col_ - 1}, {row_, col_}, "");
-        --col_;
+        const std::size_t previous = prevCharStart(buffer_->line(row_), col_);
+        applyEdit({row_, previous}, {row_, col_}, "");
+        col_ = previous;
     } else if (row_ > 0) {
         const std::size_t previousLength = buffer_->line(row_ - 1).size();
         applyEdit({row_ - 1, previousLength}, {row_, 0}, "");
@@ -1140,13 +1176,14 @@ void Editor::backspace() {
     } else {
         return;
     }
-    wantedCol_ = col_;
+    rememberColumn();
 }
 
 void Editor::deleteForward() {
-    const std::size_t length = buffer_->line(row_).size();
+    const std::string& line = buffer_->line(row_);
+    const std::size_t length = line.size();
     if (col_ < length) {
-        applyEdit({row_, col_}, {row_, col_ + 1}, "");
+        applyEdit({row_, col_}, {row_, col_ + charLength(line, col_)}, "");
     } else if (row_ + 1 < buffer_->lineCount()) {
         applyEdit({row_, length}, {row_ + 1, 0}, "");
     }
@@ -1203,7 +1240,8 @@ void Editor::redo(int count) {
 void Editor::placeCursor(Pos where) {
     row_ = std::min(where.row, buffer_->lineCount() - 1);
     col_ = std::min(where.col, maxColumn(row_));
-    wantedCol_ = col_;
+    col_ = snapToStart(buffer_->line(row_), col_);
+    rememberColumn();
 }
 
 bool Editor::hasCount() const {
@@ -1241,7 +1279,7 @@ std::optional<Motion> Editor::operatorMotion(const Key& key, bool wasPendingG, i
     const Pos here{row_, col_};
 
     switch (key.type) {
-        case KeyType::Left: return charLeft(here, count);
+        case KeyType::Left: return charLeft(*buffer_, here, count);
         case KeyType::Right: return charRight(*buffer_, here, count);
         case KeyType::Up: return lineUp(here, count);
         case KeyType::Down: return lineDown(*buffer_, here, count);
@@ -1254,7 +1292,7 @@ std::optional<Motion> Editor::operatorMotion(const Key& key, bool wasPendingG, i
     const auto line = static_cast<std::size_t>(count) - 1;
 
     switch (key.ch) {
-        case 'h': return charLeft(here, count);
+        case 'h': return charLeft(*buffer_, here, count);
         case 'l': return charRight(*buffer_, here, count);
         case 'k': return lineUp(here, count);
         case 'j': return lineDown(*buffer_, here, count);
@@ -1302,7 +1340,7 @@ void Editor::operate(char op, const Motion& motion) {
         row_ = range.start.row;
         if (!range.linewise) col_ = range.start.col;
         col_ = std::min(col_, maxColumn(row_));
-        wantedCol_ = col_;
+        rememberColumn();
         return;
     }
 
@@ -1329,7 +1367,7 @@ void Editor::operate(char op, const Motion& motion) {
         row_ = std::min(first, buffer_->lineCount() - 1);
         col_ = firstNonBlank(*buffer_, {row_, 0}).target.col;
         col_ = std::min(col_, maxColumn(row_));
-        wantedCol_ = col_;
+        rememberColumn();
         return;
     }
 
@@ -1341,7 +1379,8 @@ void Editor::operate(char op, const Motion& motion) {
         return;
     }
     col_ = std::min(col_, maxColumn(row_));
-    wantedCol_ = col_;
+    col_ = snapToStart(buffer_->line(row_), col_);
+    rememberColumn();
 }
 
 void Editor::put(bool after, int count) {
@@ -1374,31 +1413,38 @@ void Editor::put(bool after, int count) {
         std::string payload;
         for (int i = 0; i < count; ++i) payload += reg_.text;
 
-        const std::size_t length = buffer_->line(row_).size();
-        const std::size_t at = after && length > 0 ? std::min(col_ + 1, length) : col_;
+        const std::string& current = buffer_->line(row_);
+        const std::size_t length = current.size();
+        const std::size_t at =
+            after && length > 0 ? std::min(col_ + charLength(current, col_), length) : col_;
         applyEdit({row_, at}, {row_, at}, payload);
         if (payload.find('\n') == std::string::npos) {
-            col_ = at + payload.size() - 1;
+            col_ = at + prevCharStart(payload, payload.size());
         } else {
             col_ = at;
         }
     }
 
     col_ = std::min(col_, maxColumn(row_));
-    wantedCol_ = col_;
+    rememberColumn();
 }
 
 void Editor::putBlock(bool after, int count) {
     std::size_t width = 0;
-    for (const std::string& piece : reg_.rows) width = std::max(width, piece.size());
+    for (const std::string& piece : reg_.rows) {
+        width = std::max(width, static_cast<std::size_t>(displayWidth(piece)));
+    }
 
-    const std::size_t length = buffer_->line(row_).size();
-    const std::size_t at = after && length > 0 ? std::min(col_ + 1, length) : col_;
+    const std::string& current = buffer_->line(row_);
+    const std::size_t length = current.size();
+    const std::size_t at =
+        after && length > 0 ? std::min(col_ + charLength(current, col_), length) : col_;
+    const auto atCol = static_cast<std::size_t>(displayColumn(current, at));
     const std::size_t first = row_;
 
     for (std::size_t i = 0; i < reg_.rows.size(); ++i) {
         const std::string& source = reg_.rows[i];
-        const std::size_t gap = width - source.size();
+        const std::size_t gap = width - static_cast<std::size_t>(displayWidth(source));
 
         std::string piece;
         for (int k = 0; k < count; ++k) {
@@ -1411,31 +1457,40 @@ void Editor::putBlock(bool after, int count) {
             piece.resize(piece.size() - gap);
             const std::size_t lastRow = buffer_->lineCount() - 1;
             const std::size_t end = buffer_->line(lastRow).size();
-            applyEdit({lastRow, end}, {lastRow, end}, "\n" + std::string(at, ' ') + piece);
+            applyEdit({lastRow, end}, {lastRow, end}, "\n" + std::string(atCol, ' ') + piece);
             continue;
         }
 
-        const std::size_t lineLength = buffer_->line(r).size();
-        if (lineLength <= at) piece.resize(piece.size() - gap);
+        const std::string& line = buffer_->line(r);
+        const auto lineWidth = static_cast<std::size_t>(displayWidth(line));
+        if (lineWidth <= atCol) piece.resize(piece.size() - gap);
 
-        const std::size_t position = std::min(at, lineLength);
-        const std::string padding(at > lineLength ? at - lineLength : 0, ' ');
-        applyEdit({r, position}, {r, position}, padding + piece);
+        const std::size_t position = byteForColumn(line, atCol);
+        const std::size_t padding = atCol > lineWidth ? atCol - lineWidth : 0;
+        applyEdit({r, position}, {r, position}, std::string(padding, ' ') + piece);
     }
 
     row_ = first;
     col_ = std::min(at, maxColumn(row_));
-    wantedCol_ = col_;
+    col_ = snapToStart(buffer_->line(row_), col_);
+    rememberColumn();
 }
 
 void Editor::moveLeft(std::size_t n) {
-    col_ = col_ > n ? col_ - n : 0;
-    wantedCol_ = col_;
+    const std::string& line = buffer_->line(row_);
+    for (std::size_t i = 0; i < n && col_ > 0; ++i) col_ = prevCharStart(line, col_);
+    rememberColumn();
 }
 
 void Editor::moveRight(std::size_t n) {
-    col_ = std::min(col_ + n, maxColumn(row_));
-    wantedCol_ = col_;
+    const std::string& line = buffer_->line(row_);
+    const std::size_t limit = maxColumn(row_);
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::size_t length = charLength(line, col_);
+        if (length == 0 || col_ + length > limit) break;
+        col_ += length;
+    }
+    rememberColumn();
 }
 
 void Editor::moveUp(std::size_t n) {
@@ -1477,12 +1532,13 @@ void Editor::pageDown() {
 void Editor::jumpTo(const Motion& motion) {
     row_ = std::min(motion.target.row, buffer_->lineCount() - 1);
     col_ = std::min(motion.target.col, maxColumn(row_));
-    wantedCol_ = col_;
+    col_ = snapToStart(buffer_->line(row_), col_);
+    rememberColumn();
 }
 
-void Editor::startFind(char kind, char ch) {
+void Editor::startFind(char kind, const std::string& target) {
     FindState find;
-    find.ch = ch;
+    find.target = target;
     find.forward = kind == 'f' || kind == 't';
     find.till = kind == 't' || kind == 'T';
     find.valid = true;
@@ -1503,10 +1559,11 @@ void Editor::repeatFind(bool reverse, int count) {
 void Editor::runFind(const FindState& find, bool repeat, int count) {
     Pos start{row_, col_};
     if (repeat && find.till) {
+        const std::string& line = buffer_->line(row_);
         if (find.forward) {
-            ++start.col;
+            start.col += charLength(line, start.col);
         } else if (start.col > 0) {
-            --start.col;
+            start.col = prevCharStart(line, start.col);
         } else {
             resetPending();
             return;
@@ -1514,7 +1571,7 @@ void Editor::runFind(const FindState& find, bool repeat, int count) {
     }
 
     const std::optional<Motion> motion =
-        findChar(*buffer_, start, find.ch, find.forward, find.till, count);
+        findChar(*buffer_, start, find.target, find.forward, find.till, count);
 
     if (motion && pendingOp_ != 0) {
         operate(pendingOp_, *motion);
@@ -1524,8 +1581,18 @@ void Editor::runFind(const FindState& find, bool repeat, int count) {
     if (motion) jumpTo(*motion);
 }
 
+void Editor::rememberColumn() {
+    wantedCol_ = static_cast<std::size_t>(renderColumn());
+}
+
 void Editor::applyWantedColumn() {
-    col_ = std::min(wantedCol_, maxColumn(row_));
+    const std::string& line = buffer_->line(row_);
+    if (wantedCol_ == kEnd) {
+        col_ = maxColumn(row_);
+    } else {
+        col_ = std::min(byteForColumn(line, wantedCol_), maxColumn(row_));
+    }
+    col_ = snapToStart(line, col_);
 }
 
 void Editor::scroll() {
@@ -1540,9 +1607,10 @@ void Editor::scroll() {
 }
 
 std::size_t Editor::maxColumn(std::size_t row) const {
-    const std::size_t length = buffer_->line(row).size();
-    if (mode_ == Mode::Insert) return length;
-    return length == 0 ? 0 : length - 1;
+    const std::string& line = buffer_->line(row);
+    if (line.empty()) return 0;
+    if (mode_ == Mode::Insert) return line.size();
+    return prevCharStart(line, line.size());
 }
 
 std::size_t Editor::textRows() const {
