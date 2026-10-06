@@ -205,6 +205,10 @@ void Editor::handleKey(const Key& key) {
         case Mode::Insert:
             handleInsertKey(key);
             break;
+        case Mode::Visual:
+            message_.clear();
+            handleVisualKey(key);
+            break;
         case Mode::Normal:
             message_.clear();
             handleNormalKey(key);
@@ -226,6 +230,7 @@ ViewState Editor::view() const {
         case Mode::Insert: v.mode = "INSERT"; break;
         case Mode::Command: v.mode = "COMMAND"; break;
         case Mode::Search: v.mode = "SEARCH"; break;
+        case Mode::Visual: v.mode = visualKind_ == 'V' ? "V-LINE" : "VISUAL"; break;
     }
     v.fileName = path_;
     v.modified = history_.modified();
@@ -237,7 +242,7 @@ ViewState Editor::view() const {
     } else {
         v.message = message_;
     }
-    if (mode_ == Mode::Normal) {
+    if (mode_ == Mode::Normal || mode_ == Mode::Visual) {
         const std::string pending = pendingText();
         if (!pending.empty()) v.message = pending;
     }
@@ -245,6 +250,12 @@ ViewState Editor::view() const {
         v.searchPattern = searchText_;
     } else if (highlight_) {
         v.searchPattern = lastSearch_;
+    }
+    if (mode_ == Mode::Visual) {
+        Pos a = anchor_;
+        Pos b{row_, col_};
+        if (b < a) std::swap(a, b);
+        v.selection = Selection{a, b, visualKind_ == 'V'};
     }
     v.showWelcome = path_.empty() && buffer_->lineCount() == 1 && buffer_->line(0).empty();
     v.rowOffset = rowOff_;
@@ -375,6 +386,8 @@ void Editor::handleNormalKey(const Key& key) {
         case 'p': put(true, n); break;
         case 'P': put(false, n); break;
         case 'u': undo(n); break;
+        case 'v': enterVisual('v'); break;
+        case 'V': enterVisual('V'); break;
         case 'i':
             enterInsert();
             break;
@@ -438,6 +451,117 @@ void Editor::handleOperatorKey(const Key& key, bool wasPendingG) {
         return;
     }
     operate(op, *motion);
+}
+
+void Editor::handleVisualKey(const Key& key) {
+    if (pendingFind_ != 0) {
+        handleNormalKey(key);
+        return;
+    }
+
+    if (pendingG_) {
+        if (key.type == KeyType::Char && key.ch == 'g') {
+            handleNormalKey(key);
+        } else {
+            resetPending();
+        }
+        return;
+    }
+
+    if (key.type == KeyType::Escape) {
+        leaveVisual();
+        return;
+    }
+
+    switch (key.type) {
+        case KeyType::Up:
+        case KeyType::Down:
+        case KeyType::Left:
+        case KeyType::Right:
+        case KeyType::Home:
+        case KeyType::End:
+        case KeyType::PageUp:
+        case KeyType::PageDown:
+            handleNormalKey(key);
+            return;
+        case KeyType::Char: break;
+        default: return;
+    }
+
+    switch (key.ch) {
+        case 'h':
+        case 'j':
+        case 'k':
+        case 'l':
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+        case '$':
+        case '^':
+        case 'w':
+        case 'b':
+        case 'e':
+        case '{':
+        case '}':
+        case 'f':
+        case 'F':
+        case 't':
+        case 'T':
+        case ';':
+        case ',':
+        case 'n':
+        case 'N':
+        case 'G':
+        case 'g':
+            handleNormalKey(key);
+            return;
+        case 'v':
+        case 'V':
+            if (visualKind_ == key.ch) {
+                leaveVisual();
+            } else {
+                visualKind_ = key.ch;
+            }
+            return;
+        case 'o':
+        case 'O': {
+            const Pos cursor{row_, col_};
+            row_ = anchor_.row;
+            col_ = anchor_.col;
+            anchor_ = cursor;
+            wantedCol_ = col_;
+            return;
+        }
+        case 'd':
+        case 'x': operateVisual('d', false); return;
+        case 'D':
+        case 'X': operateVisual('d', true); return;
+        case 'y': operateVisual('y', false); return;
+        case 'Y': operateVisual('y', true); return;
+        case 'c':
+        case 's': operateVisual('c', false); return;
+        case 'C':
+        case 'S':
+        case 'R': operateVisual('c', true); return;
+        case 'p':
+        case 'P': visualPut(); return;
+        case ':': {
+            const std::size_t first = std::min(anchor_.row, row_);
+            const std::size_t last = std::max(anchor_.row, row_);
+            leaveVisual();
+            mode_ = Mode::Command;
+            commandText_ = std::to_string(first + 1) + "," + std::to_string(last + 1);
+            return;
+        }
+        default: return;
+    }
 }
 
 void Editor::handleInsertKey(const Key& key) {
@@ -594,6 +718,59 @@ void Editor::requestQuit(bool force) {
         return;
     }
     quit_ = true;
+}
+
+void Editor::enterVisual(char kind) {
+    resetPending();
+    mode_ = Mode::Visual;
+    visualKind_ = kind;
+    anchor_ = {row_, col_};
+}
+
+void Editor::leaveVisual() {
+    mode_ = Mode::Normal;
+    resetPending();
+    col_ = std::min(col_, maxColumn(row_));
+}
+
+void Editor::operateVisual(char op, bool forceLine) {
+    takeCount();
+
+    Pos a = anchor_;
+    Pos b{row_, col_};
+    if (b < a) std::swap(a, b);
+
+    const bool linewise = forceLine || visualKind_ == 'V';
+    mode_ = Mode::Normal;
+    row_ = a.row;
+    col_ = a.col;
+    operate(op, Motion{b, linewise, !linewise});
+}
+
+void Editor::visualPut() {
+    const int n = takeCount();
+
+    if (reg_.text.empty()) {
+        message_ = "Nothing in register";
+        leaveVisual();
+        return;
+    }
+
+    Pos a = anchor_;
+    Pos b{row_, col_};
+    if (b < a) std::swap(a, b);
+
+    const bool linewise = visualKind_ == 'V';
+    const bool atEnd = linewise ? b.row + 1 >= buffer_->lineCount()
+                                : b.col + 1 >= buffer_->line(b.row).size();
+
+    const Register previous = reg_;
+    operateVisual('d', false);
+    const Register deleted = reg_;
+
+    reg_ = previous;
+    put(atEnd, n);
+    reg_ = deleted;
 }
 
 void Editor::beginSearch(bool forward) {
