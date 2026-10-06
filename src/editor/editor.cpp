@@ -48,6 +48,17 @@ std::string describe(const std::string& path, std::size_t lines, std::size_t byt
     return "\"" + path + "\" " + std::to_string(lines) + "L, " + std::to_string(bytes) + "B";
 }
 
+std::optional<MapMode> mapModeFor(Mode mode) {
+    switch (mode) {
+        case Mode::Normal: return MapMode::Normal;
+        case Mode::Insert: return MapMode::Insert;
+        case Mode::Visual: return MapMode::Visual;
+        case Mode::Command:
+        case Mode::Search: return std::nullopt;
+    }
+    return std::nullopt;
+}
+
 Range makeRange(const TextBuffer& buffer, Pos from, const Motion& motion) {
     Pos a = from;
     Pos b = motion.target;
@@ -189,12 +200,84 @@ void Editor::open(const std::string& path) {
     scroll();
 }
 
+bool Editor::useConfig(const std::string& path) {
+    configPath_ = path;
+    const Config config = loadConfig(path);
+
+    keymap_ = Keymap();
+    for (const Mapping& mapping : config.mappings) {
+        keymap_.add(mapping.mode, mapping.lhs, mapping.rhs);
+    }
+    aliases_ = config.aliases;
+    timeoutTicks_ = std::max(1, (config.timeoutMs + 99) / 100);
+    mapPending_.clear();
+    mapTicks_ = 0;
+
+    if (!config.errors.empty()) {
+        message_ = path + ": " + config.errors.front();
+        if (config.errors.size() > 1) {
+            message_ += " (+" + std::to_string(config.errors.size() - 1) + " more)";
+        }
+    }
+    return config.found;
+}
+
 void Editor::resize(Size size) {
     size_ = size;
     scroll();
 }
 
 void Editor::handleKey(const Key& key) {
+    mapPending_.push_back(key);
+    mapTicks_ = 0;
+    resolveMaps(false);
+}
+
+bool Editor::idle() {
+    if (mapPending_.empty()) return false;
+    if (++mapTicks_ < timeoutTicks_) return false;
+    mapTicks_ = 0;
+    resolveMaps(true);
+    return true;
+}
+
+bool Editor::canMap() const {
+    switch (mode_) {
+        case Mode::Insert:
+            return true;
+        case Mode::Normal:
+            return pendingOp_ == 0 && pendingFind_ == 0 && !pendingG_ && count_ == 0 &&
+                   opCount_ == 0;
+        case Mode::Visual:
+            return pendingFind_ == 0 && !pendingG_ && count_ == 0;
+        case Mode::Command:
+        case Mode::Search:
+            return false;
+    }
+    return false;
+}
+
+void Editor::resolveMaps(bool timedOut) {
+    while (!mapPending_.empty()) {
+        const std::optional<MapMode> kind = mapModeFor(mode_);
+        if (kind && canMap()) {
+            const MapLookup found = keymap_.find(*kind, mapPending_);
+            if (found.longer && !timedOut) return;
+            if (found.exact != nullptr) {
+                const std::vector<Key> rhs = *found.exact;
+                mapPending_.clear();
+                for (const Key& key : rhs) dispatch(key);
+                return;
+            }
+        }
+
+        const Key first = mapPending_.front();
+        mapPending_.erase(mapPending_.begin());
+        dispatch(first);
+    }
+}
+
+void Editor::dispatch(const Key& key) {
     switch (mode_) {
         case Mode::Command:
             handleCommandKey(key);
@@ -680,6 +763,10 @@ void Editor::runCommand(const std::string& text) {
         name.pop_back();
     }
 
+    if (const auto alias = aliases_.find(name); alias != aliases_.end()) {
+        name = alias->second;
+    }
+
     if (name == "w" || name == "write") {
         save(argument);
     } else if (name == "q" || name == "quit" || name == "khalas") {
@@ -688,6 +775,12 @@ void Editor::runCommand(const std::string& text) {
         if (save(argument)) requestQuit(true);
     } else if (name == "noh" || name == "nohlsearch") {
         highlight_ = false;
+    } else if (name == "reload") {
+        message_.clear();
+        const bool found = useConfig(configPath_);
+        if (message_.empty()) {
+            message_ = found ? "Config reloaded" : "No config file: " + configPath_;
+        }
     } else {
         message_ = "Not an editor command: " + name;
     }
