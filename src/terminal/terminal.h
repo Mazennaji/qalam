@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace qalam {
 
@@ -33,6 +34,7 @@ namespace qalam {
     enum class KeyType {
         None,
         Char,
+        Text,
         Ctrl,
         Enter,
         Tab,
@@ -51,8 +53,12 @@ namespace qalam {
     };
 
     struct Key {
-        KeyType type = KeyType::None;
-        char ch = 0;
+        KeyType type;
+        char ch;
+        std::string text;
+
+        Key(KeyType t = KeyType::None, char c = 0, std::string s = {})
+            : type(t), ch(c), text(std::move(s)) {}
     };
 
     Key readKey();
