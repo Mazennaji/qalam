@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "buffer/line_buffer.h"
+#include "config/config.h"
 #include "editor/editor.h"
 #include "render/render.h"
 #include "terminal/terminal.h"
@@ -16,6 +17,7 @@ int main(int argc, char** argv) {
 
         Editor editor(std::make_unique<LineBuffer>());
         if (argc > 1) editor.open(argv[1]);
+        editor.useConfig(defaultConfigPath());
 
         Size size = windowSize();
         editor.resize(size);
@@ -25,6 +27,7 @@ int main(int argc, char** argv) {
 
             Key key = readKey();
             while (key.type == KeyType::None && windowSize() == size) {
+                if (editor.idle()) break;
                 key = readKey();
             }
 
