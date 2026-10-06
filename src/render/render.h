@@ -1,12 +1,20 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 
+#include "buffer/pos.h"
 #include "buffer/text_buffer.h"
 #include "terminal/terminal.h"
 
 namespace qalam {
+
+    struct Selection {
+        Pos start;
+        Pos end;
+        bool linewise = false;
+    };
 
     struct ViewState {
         const TextBuffer* buffer = nullptr;
@@ -14,6 +22,7 @@ namespace qalam {
         std::string fileName;
         std::string message;
         std::string searchPattern;
+        std::optional<Selection> selection;
         bool modified = false;
         bool commandLine = false;
         bool showWelcome = false;
