@@ -1,11 +1,13 @@
 #include "editor/editor.h"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <optional>
 #include <utility>
 
 #include "buffer/file_io.h"
+#include "search/substitute.h"
 #include "text/columns.h"
 
 namespace qalam {
@@ -19,6 +21,17 @@ struct Range {
     Pos end;
     bool linewise;
 };
+
+struct SubstituteSpec {
+    std::size_t first = 0;
+    std::size_t last = 0;
+    std::string pattern;
+    std::string replacement;
+    bool global = false;
+    CaseMode mode = CaseMode::Smart;
+};
+
+enum class Parse { NotSubstitute, Valid, Invalid };
 
 std::string trim(const std::string& s) {
     const auto first = s.find_first_not_of(" \t");
@@ -54,6 +67,97 @@ Range makeRange(const TextBuffer& buffer, Pos from, const Motion& motion) {
     return {a, b, false};
 }
 
+std::optional<std::size_t> parseAddress(const std::string& s, std::size_t& i,
+                                        std::size_t current, std::size_t lineCount) {
+    if (i >= s.size()) return std::nullopt;
+    if (s[i] == '.') {
+        ++i;
+        return current;
+    }
+    if (s[i] == '$') {
+        ++i;
+        return lineCount - 1;
+    }
+    if (!std::isdigit(static_cast<unsigned char>(s[i]))) return std::nullopt;
+
+    std::size_t n = 0;
+    while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) {
+        n = std::min<std::size_t>(n * 10 + static_cast<std::size_t>(s[i] - '0'), 1000000);
+        ++i;
+    }
+    if (n == 0) return std::size_t{0};
+    return std::min(n - 1, lineCount - 1);
+}
+
+Parse parseSubstitute(const std::string& text, std::size_t current, std::size_t lineCount,
+                      SubstituteSpec& spec) {
+    std::size_t i = 0;
+    spec.first = current;
+    spec.last = current;
+
+    if (i < text.size() && text[i] == '%') {
+        spec.first = 0;
+        spec.last = lineCount - 1;
+        ++i;
+    } else if (const auto a = parseAddress(text, i, current, lineCount)) {
+        spec.first = *a;
+        spec.last = *a;
+        if (i < text.size() && text[i] == ',') {
+            ++i;
+            const auto b = parseAddress(text, i, current, lineCount);
+            if (!b) return Parse::Invalid;
+            spec.last = *b;
+        }
+    }
+
+    if (i >= text.size() || text[i] != 's') return Parse::NotSubstitute;
+    ++i;
+    if (i >= text.size()) return Parse::NotSubstitute;
+
+    const char delim = text[i];
+    if (std::isalnum(static_cast<unsigned char>(delim)) || delim == ' ' || delim == '\\' ||
+        delim == '"') {
+        return Parse::NotSubstitute;
+    }
+    ++i;
+
+    auto readPart = [&](std::string& out) {
+        while (i < text.size() && text[i] != delim) {
+            if (text[i] == '\\' && i + 1 < text.size() && text[i + 1] == delim) {
+                out += delim;
+                i += 2;
+            } else {
+                out += text[i++];
+            }
+        }
+        if (i < text.size()) {
+            ++i;
+            return true;
+        }
+        return false;
+    };
+
+    readPart(spec.pattern);
+    const bool closed = readPart(spec.replacement);
+
+    if (closed) {
+        for (; i < text.size(); ++i) {
+            if (text[i] == 'g') {
+                spec.global = true;
+            } else if (text[i] == 'i') {
+                spec.mode = CaseMode::Insensitive;
+            } else if (text[i] == 'I') {
+                spec.mode = CaseMode::Sensitive;
+            } else {
+                return Parse::Invalid;
+            }
+        }
+    }
+
+    if (spec.first > spec.last) std::swap(spec.first, spec.last);
+    return Parse::Valid;
+}
+
 }
 
 Editor::Editor(std::unique_ptr<TextBuffer> buffer) : buffer_(std::move(buffer)) {}
@@ -79,6 +183,7 @@ void Editor::open(const std::string& path) {
     wantedCol_ = 0;
     rowOff_ = 0;
     colOff_ = 0;
+    highlight_ = false;
     resetPending();
     history_.clear();
     scroll();
@@ -93,6 +198,9 @@ void Editor::handleKey(const Key& key) {
     switch (mode_) {
         case Mode::Command:
             handleCommandKey(key);
+            break;
+        case Mode::Search:
+            handleSearchKey(key);
             break;
         case Mode::Insert:
             handleInsertKey(key);
@@ -117,14 +225,26 @@ ViewState Editor::view() const {
         case Mode::Normal: v.mode = "NORMAL"; break;
         case Mode::Insert: v.mode = "INSERT"; break;
         case Mode::Command: v.mode = "COMMAND"; break;
+        case Mode::Search: v.mode = "SEARCH"; break;
     }
     v.fileName = path_;
     v.modified = history_.modified();
-    v.commandLine = mode_ == Mode::Command;
-    v.message = v.commandLine ? ":" + commandText_ : message_;
+    v.commandLine = mode_ == Mode::Command || mode_ == Mode::Search;
+    if (mode_ == Mode::Command) {
+        v.message = ":" + commandText_;
+    } else if (mode_ == Mode::Search) {
+        v.message = (searchForward_ ? "/" : "?") + searchText_;
+    } else {
+        v.message = message_;
+    }
     if (mode_ == Mode::Normal) {
         const std::string pending = pendingText();
         if (!pending.empty()) v.message = pending;
+    }
+    if (mode_ == Mode::Search) {
+        v.searchPattern = searchText_;
+    } else if (highlight_) {
+        v.searchPattern = lastSearch_;
     }
     v.showWelcome = path_.empty() && buffer_->lineCount() == 1 && buffer_->line(0).empty();
     v.rowOffset = rowOff_;
@@ -231,6 +351,10 @@ void Editor::handleNormalKey(const Key& key) {
         case '{': jumpTo(paragraphBackward(*buffer_, here, n)); break;
         case ';': repeatFind(false, n); break;
         case ',': repeatFind(true, n); break;
+        case '/': beginSearch(true); break;
+        case '?': beginSearch(false); break;
+        case 'n': findNext(false, n); break;
+        case 'N': findNext(true, n); break;
         case 'G': moveToLine(counted ? un - 1 : buffer_->lineCount() - 1); break;
         case 'g': moveToLine(counted ? un - 1 : 0); break;
         case 'D': operate('d', lineEnd(*buffer_, here)); break;
@@ -377,9 +501,50 @@ void Editor::handleCommandKey(const Key& key) {
     }
 }
 
+void Editor::handleSearchKey(const Key& key) {
+    switch (key.type) {
+        case KeyType::Char:
+            searchText_ += key.ch;
+            previewSearch();
+            break;
+        case KeyType::Tab:
+            searchText_ += '\t';
+            previewSearch();
+            break;
+        case KeyType::Backspace:
+            if (searchText_.empty()) {
+                cancelSearch();
+            } else {
+                searchText_.pop_back();
+                previewSearch();
+            }
+            break;
+        case KeyType::Escape:
+            cancelSearch();
+            break;
+        case KeyType::Enter:
+            commitSearch();
+            break;
+        default: break;
+    }
+}
+
 void Editor::runCommand(const std::string& text) {
     const std::string line = trim(text);
     if (line.empty()) return;
+
+    SubstituteSpec spec;
+    switch (parseSubstitute(line, row_, buffer_->lineCount(), spec)) {
+        case Parse::Valid:
+            substitute(spec.first, spec.last, spec.pattern, spec.replacement, spec.global,
+                       spec.mode);
+            return;
+        case Parse::Invalid:
+            message_ = "Invalid substitute command";
+            return;
+        case Parse::NotSubstitute:
+            break;
+    }
 
     const auto split = line.find_first_of(" \t");
     std::string name = line.substr(0, split);
@@ -397,6 +562,8 @@ void Editor::runCommand(const std::string& text) {
         requestQuit(force);
     } else if (name == "wq" || name == "x") {
         if (save(argument)) requestQuit(true);
+    } else if (name == "noh" || name == "nohlsearch") {
+        highlight_ = false;
     } else {
         message_ = "Not an editor command: " + name;
     }
@@ -427,6 +594,118 @@ void Editor::requestQuit(bool force) {
         return;
     }
     quit_ = true;
+}
+
+void Editor::beginSearch(bool forward) {
+    resetPending();
+    mode_ = Mode::Search;
+    searchForward_ = forward;
+    searchText_.clear();
+    searchOrigin_ = {row_, col_};
+}
+
+void Editor::previewSearch() {
+    row_ = searchOrigin_.row;
+    col_ = searchOrigin_.col;
+    wantedCol_ = col_;
+    if (searchText_.empty()) return;
+
+    const std::optional<SearchHit> hit = searchForward_
+                                             ? searchForward(*buffer_, searchOrigin_, searchText_)
+                                             : searchBackward(*buffer_, searchOrigin_, searchText_);
+    if (hit) placeCursor(hit->pos);
+}
+
+void Editor::cancelSearch() {
+    mode_ = Mode::Normal;
+    searchText_.clear();
+    row_ = searchOrigin_.row;
+    col_ = searchOrigin_.col;
+    wantedCol_ = col_;
+}
+
+void Editor::commitSearch() {
+    mode_ = Mode::Normal;
+    const std::string pattern = searchText_;
+    searchText_.clear();
+
+    row_ = searchOrigin_.row;
+    col_ = searchOrigin_.col;
+    wantedCol_ = col_;
+
+    lastForward_ = searchForward_;
+    if (!pattern.empty()) lastSearch_ = pattern;
+    findNext(false, 1);
+}
+
+void Editor::findNext(bool reverse, int count) {
+    if (lastSearch_.empty()) {
+        message_ = "No previous search pattern";
+        return;
+    }
+
+    const bool forward = reverse ? !lastForward_ : lastForward_;
+    Pos pos{row_, col_};
+    bool wrapped = false;
+
+    for (int i = 0; i < count; ++i) {
+        const std::optional<SearchHit> hit = forward ? searchForward(*buffer_, pos, lastSearch_)
+                                                     : searchBackward(*buffer_, pos, lastSearch_);
+        if (!hit) {
+            message_ = "Pattern not found: " + lastSearch_;
+            return;
+        }
+        pos = hit->pos;
+        wrapped = wrapped || hit->wrapped;
+    }
+
+    highlight_ = true;
+    placeCursor(pos);
+
+    if (wrapped) {
+        message_ = forward ? "search hit BOTTOM, continuing at TOP"
+                           : "search hit TOP, continuing at BOTTOM";
+    } else {
+        message_ = std::string(forward ? "/" : "?") + lastSearch_;
+    }
+}
+
+void Editor::substitute(std::size_t first, std::size_t last, std::string pattern,
+                        const std::string& replacement, bool global, CaseMode mode) {
+    if (pattern.empty()) pattern = lastSearch_;
+    if (pattern.empty()) {
+        message_ = "No previous search pattern";
+        return;
+    }
+
+    last = std::min(last, buffer_->lineCount() - 1);
+    first = std::min(first, last);
+
+    std::size_t total = 0;
+    std::size_t lines = 0;
+    std::size_t lastRow = first;
+
+    for (std::size_t row = first; row <= last; ++row) {
+        const SubstituteResult result =
+            substituteLine(buffer_->line(row), pattern, replacement, global, mode);
+        if (result.count == 0) continue;
+        applyEdit({row, 0}, {row, buffer_->line(row).size()}, result.line);
+        total += result.count;
+        ++lines;
+        lastRow = row;
+    }
+
+    lastSearch_ = pattern;
+    highlight_ = true;
+
+    if (total == 0) {
+        message_ = "Pattern not found: " + pattern;
+        return;
+    }
+
+    placeCursor({lastRow, firstNonBlank(*buffer_, {lastRow, 0}).target.col});
+    message_ = std::to_string(total) + (total == 1 ? " substitution" : " substitutions") +
+               " on " + std::to_string(lines) + (lines == 1 ? " line" : " lines");
 }
 
 void Editor::enterInsert() {
