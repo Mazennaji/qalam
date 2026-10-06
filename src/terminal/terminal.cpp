@@ -128,7 +128,19 @@ Key decodeEscape() {
     return {KeyType::Unknown, 0};
 }
 
-}  // namespace
+Key decodeUtf8(unsigned char lead) {
+    const int extra = lead >= 0xF0 ? 3 : lead >= 0xE0 ? 2 : 1;
+    std::string text(1, static_cast<char>(lead));
+
+    for (int i = 0; i < extra; ++i) {
+        auto b = readByte();
+        if (!b || (*b & 0xC0) != 0x80) return {KeyType::Unknown, 0};
+        text.push_back(static_cast<char>(*b));
+    }
+    return {KeyType::Text, 0, text};
+}
+
+}
 
 Key readKey() {
     auto b = readByte();
@@ -141,6 +153,7 @@ Key readKey() {
     if (c == 127 || c == 8) return {KeyType::Backspace, 0};
     if (c >= 1 && c <= 26) return {KeyType::Ctrl, static_cast<char>('a' + c - 1)};
     if (c >= 32 && c < 127) return {KeyType::Char, static_cast<char>(c)};
+    if (c >= 0xC2 && c <= 0xF4) return decodeUtf8(c);
     return {KeyType::Unknown, 0};
 }
 
@@ -148,6 +161,7 @@ std::string keyName(const Key& key) {
     switch (key.type) {
         case KeyType::None: return "none";
         case KeyType::Char: return std::string("'") + key.ch + "'";
+        case KeyType::Text: return "'" + key.text + "'";
         case KeyType::Ctrl: return std::string("Ctrl-") + key.ch;
         case KeyType::Enter: return "Enter";
         case KeyType::Tab: return "Tab";
