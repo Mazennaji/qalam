@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <utility>
+#include <vector>
 
+#include "search/search.h"
 #include "text/columns.h"
 
 namespace qalam {
@@ -37,11 +39,33 @@ void appendWelcome(std::string& out, int cols) {
     out += text;
 }
 
-void appendTextRow(std::string& out, const std::string& line, int colOffset, int cols) {
+void appendTextRow(std::string& out, const std::string& line, int colOffset, int cols,
+                   const std::string& pattern) {
     const std::string text = expandTabs(line);
     const auto start = static_cast<std::size_t>(std::max(colOffset, 0));
     if (start >= text.size()) return;
-    out.append(text, start, static_cast<std::size_t>(std::max(cols, 0)));
+    const std::size_t end = std::min(text.size(), start + static_cast<std::size_t>(std::max(cols, 0)));
+
+    std::vector<bool> marked;
+    if (!pattern.empty()) {
+        marked.assign(text.size(), false);
+        for (const Span& span : findInLine(line, pattern)) {
+            const auto from = static_cast<std::size_t>(displayColumn(line, span.first));
+            const auto to = static_cast<std::size_t>(displayColumn(line, span.second));
+            for (std::size_t i = from; i < to && i < marked.size(); ++i) marked[i] = true;
+        }
+    }
+
+    bool on = false;
+    for (std::size_t i = start; i < end; ++i) {
+        const bool want = !marked.empty() && marked[i];
+        if (want != on) {
+            out += want ? "\x1b[30;43m" : "\x1b[m";
+            on = want;
+        }
+        out += text[i];
+    }
+    if (on) out += "\x1b[m";
 }
 
 }
@@ -59,7 +83,8 @@ std::string renderFrame(Size size, const ViewState& view) {
     for (int y = 0; y < textRows; ++y) {
         const std::size_t row = view.rowOffset + static_cast<std::size_t>(y);
         if (row < lineCount) {
-            appendTextRow(out, view.buffer->line(row), view.colOffset, size.cols);
+            appendTextRow(out, view.buffer->line(row), view.colOffset, size.cols,
+                          view.searchPattern);
         } else if (view.showWelcome && y == textRows / 3) {
             appendWelcome(out, size.cols);
         } else {
