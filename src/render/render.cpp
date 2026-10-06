@@ -13,16 +13,17 @@ namespace {
 
 std::string fitWidth(std::string left, const std::string& right, int width) {
     const auto w = static_cast<std::size_t>(std::max(width, 0));
-    if (left.size() > w) left.resize(w);
+    left = truncateToWidth(left, w);
 
-    std::string line = std::move(left);
-    if (line.size() + right.size() <= w) {
-        line.append(w - line.size() - right.size(), ' ');
-        line += right;
+    const auto leftWidth = static_cast<std::size_t>(displayWidth(left));
+    const auto rightWidth = static_cast<std::size_t>(displayWidth(right));
+    if (leftWidth + rightWidth <= w) {
+        left.append(w - leftWidth - rightWidth, ' ');
+        left += right;
     } else {
-        line.append(w - line.size(), ' ');
+        left.append(w - leftWidth, ' ');
     }
-    return line;
+    return left;
 }
 
 void appendWelcome(std::string& out, int cols) {
@@ -42,40 +43,40 @@ void appendWelcome(std::string& out, int cols) {
 void appendTextRow(std::string& out, const std::string& line, std::size_t row, int colOffset,
                    int cols, const std::string& pattern,
                    const std::optional<Selection>& selection) {
-    const std::string text = expandTabs(line);
+    const std::vector<std::string> cells = displayCells(line);
 
     const bool selected = selection && row >= selection->start.row && row <= selection->end.row;
-    if (text.empty()) {
+    if (cells.empty()) {
         if (selected) out += "\x1b[7m \x1b[m";
         return;
     }
 
     const auto start = static_cast<std::size_t>(std::max(colOffset, 0));
-    if (start >= text.size()) return;
+    if (start >= cells.size()) return;
     const std::size_t end =
-        std::min(text.size(), start + static_cast<std::size_t>(std::max(cols, 0)));
+        std::min(cells.size(), start + static_cast<std::size_t>(std::max(cols, 0)));
 
     std::size_t selFrom = 0;
     std::size_t selTo = 0;
     if (selected) {
         if (selection->block) {
-            selFrom = static_cast<std::size_t>(displayColumn(line, selection->left));
-            selTo = static_cast<std::size_t>(displayColumn(line, selection->right + 1));
+            selFrom = selection->left;
+            selTo = selection->right + 1;
         } else if (selection->linewise) {
-            selTo = text.size();
+            selTo = cells.size();
         } else {
             if (row == selection->start.row) {
                 selFrom = static_cast<std::size_t>(displayColumn(line, selection->start.col));
             }
             selTo = row == selection->end.row
                         ? static_cast<std::size_t>(displayColumn(line, selection->end.col + 1))
-                        : text.size();
+                        : cells.size();
         }
     }
 
     std::vector<bool> marked;
     if (!pattern.empty()) {
-        marked.assign(text.size(), false);
+        marked.assign(cells.size(), false);
         for (const Span& span : findInLine(line, pattern)) {
             const auto from = static_cast<std::size_t>(displayColumn(line, span.first));
             const auto to = static_cast<std::size_t>(displayColumn(line, span.second));
@@ -97,7 +98,14 @@ void appendTextRow(std::string& out, const std::string& line, std::size_t row, i
             if (want == 2) out += "\x1b[7m";
             current = want;
         }
-        out += text[i];
+
+        const std::string& glyph = cells[i];
+        if (glyph.empty()) {
+            if (i == start) out += ' ';
+            continue;
+        }
+        const bool cut = i + 1 == end && i + 1 < cells.size() && cells[i + 1].empty();
+        out += cut ? std::string(" ") : glyph;
     }
     if (current != 0) out += "\x1b[m";
 }
@@ -135,9 +143,8 @@ std::string renderFrame(Size size, const ViewState& view) {
     out += fitWidth(left, right, size.cols);
     out += "\x1b[m\r\n";
 
-    std::string msg = view.message;
     const auto w = static_cast<std::size_t>(std::max(size.cols, 0));
-    if (msg.size() > w) msg.resize(w);
+    const std::string msg = truncateToWidth(view.message, w);
     out += msg;
     out += "\x1b[K";
 
@@ -145,7 +152,7 @@ std::string renderFrame(Size size, const ViewState& view) {
     int cursorCol = view.cursorCol + 1;
     if (view.commandLine) {
         cursorRow = size.rows;
-        cursorCol = std::min(static_cast<int>(msg.size()) + 1, std::max(size.cols, 1));
+        cursorCol = std::min(displayWidth(msg) + 1, std::max(size.cols, 1));
     }
 
     out += "\x1b[" + std::to_string(cursorRow) + ";" + std::to_string(cursorCol) + "H";
