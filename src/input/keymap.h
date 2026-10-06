@@ -9,7 +9,7 @@ namespace qalam {
     enum class MapMode { Normal, Insert, Visual };
 
     inline bool sameKey(const Key& a, const Key& b) {
-        return a.type == b.type && a.ch == b.ch;
+        return a.type == b.type && a.ch == b.ch && a.text == b.text;
     }
 
     struct MapLookup {
