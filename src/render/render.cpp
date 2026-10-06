@@ -39,12 +39,36 @@ void appendWelcome(std::string& out, int cols) {
     out += text;
 }
 
-void appendTextRow(std::string& out, const std::string& line, int colOffset, int cols,
-                   const std::string& pattern) {
+void appendTextRow(std::string& out, const std::string& line, std::size_t row, int colOffset,
+                   int cols, const std::string& pattern,
+                   const std::optional<Selection>& selection) {
     const std::string text = expandTabs(line);
+
+    const bool selected = selection && row >= selection->start.row && row <= selection->end.row;
+    if (text.empty()) {
+        if (selected) out += "\x1b[7m \x1b[m";
+        return;
+    }
+
     const auto start = static_cast<std::size_t>(std::max(colOffset, 0));
     if (start >= text.size()) return;
-    const std::size_t end = std::min(text.size(), start + static_cast<std::size_t>(std::max(cols, 0)));
+    const std::size_t end =
+        std::min(text.size(), start + static_cast<std::size_t>(std::max(cols, 0)));
+
+    std::size_t selFrom = 0;
+    std::size_t selTo = 0;
+    if (selected) {
+        if (selection->linewise) {
+            selTo = text.size();
+        } else {
+            if (row == selection->start.row) {
+                selFrom = static_cast<std::size_t>(displayColumn(line, selection->start.col));
+            }
+            selTo = row == selection->end.row
+                        ? static_cast<std::size_t>(displayColumn(line, selection->end.col + 1))
+                        : text.size();
+        }
+    }
 
     std::vector<bool> marked;
     if (!pattern.empty()) {
@@ -56,16 +80,23 @@ void appendTextRow(std::string& out, const std::string& line, int colOffset, int
         }
     }
 
-    bool on = false;
+    int current = 0;
     for (std::size_t i = start; i < end; ++i) {
-        const bool want = !marked.empty() && marked[i];
-        if (want != on) {
-            out += want ? "\x1b[30;43m" : "\x1b[m";
-            on = want;
+        int want = 0;
+        if (i >= selFrom && i < selTo) {
+            want = 2;
+        } else if (!marked.empty() && marked[i]) {
+            want = 1;
+        }
+        if (want != current) {
+            out += "\x1b[m";
+            if (want == 1) out += "\x1b[30;43m";
+            if (want == 2) out += "\x1b[7m";
+            current = want;
         }
         out += text[i];
     }
-    if (on) out += "\x1b[m";
+    if (current != 0) out += "\x1b[m";
 }
 
 }
@@ -83,8 +114,8 @@ std::string renderFrame(Size size, const ViewState& view) {
     for (int y = 0; y < textRows; ++y) {
         const std::size_t row = view.rowOffset + static_cast<std::size_t>(y);
         if (row < lineCount) {
-            appendTextRow(out, view.buffer->line(row), view.colOffset, size.cols,
-                          view.searchPattern);
+            appendTextRow(out, view.buffer->line(row), row, view.colOffset, size.cols,
+                          view.searchPattern, view.selection);
         } else if (view.showWelcome && y == textRows / 3) {
             appendWelcome(out, size.cols);
         } else {
