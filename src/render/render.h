@@ -14,6 +14,9 @@ namespace qalam {
         Pos start;
         Pos end;
         bool linewise = false;
+        bool block = false;
+        std::size_t left = 0;
+        std::size_t right = 0;
     };
 
     struct ViewState {
