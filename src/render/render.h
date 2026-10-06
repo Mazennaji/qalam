@@ -13,6 +13,7 @@ namespace qalam {
         std::string mode;
         std::string fileName;
         std::string message;
+        std::string searchPattern;
         bool modified = false;
         bool commandLine = false;
         bool showWelcome = false;
