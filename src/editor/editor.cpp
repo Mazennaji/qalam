@@ -189,6 +189,7 @@ void Editor::open(const std::string& path) {
             message_ = "Cannot read \"" + path + "\"";
             break;
     }
+    syntax_.setFile(path_);
     mode_ = Mode::Normal;
     row_ = 0;
     col_ = 0;
@@ -211,6 +212,9 @@ bool Editor::useConfig(const std::string& path) {
         keymap_.add(mapping.mode, mapping.lhs, mapping.rhs);
     }
     aliases_ = config.aliases;
+    syntax_.resetColors();
+    for (const auto& [name, code] : config.colors) syntax_.setColor(name, code);
+    syntax_.setEnabled(config.syntax);
     timeoutTicks_ = std::max(1, (config.timeoutMs + 99) / 100);
     mapPending_.clear();
     mapTicks_ = 0;
@@ -310,6 +314,7 @@ bool Editor::shouldQuit() const {
 ViewState Editor::view() const {
     ViewState v;
     v.buffer = buffer_.get();
+    v.syntax = &syntax_;
     switch (mode_) {
         case Mode::Normal: v.mode = "NORMAL"; break;
         case Mode::Insert: v.mode = "INSERT"; break;
@@ -817,6 +822,16 @@ void Editor::runCommand(const std::string& text) {
         if (save(argument)) requestQuit(true);
     } else if (name == "noh" || name == "nohlsearch") {
         highlight_ = false;
+    } else if (name == "syntax") {
+        if (argument == "on") {
+            syntax_.setEnabled(true);
+        } else if (argument == "off") {
+            syntax_.setEnabled(false);
+        } else if (argument.empty()) {
+            message_ = syntax_.enabled() ? "syntax on" : "syntax off";
+        } else {
+            message_ = "usage: :syntax on|off";
+        }
     } else if (name == "reload") {
         message_.clear();
         const bool found = useConfig(configPath_);
@@ -841,7 +856,10 @@ bool Editor::save(const std::string& argument) {
         return false;
     }
 
-    if (path_.empty()) path_ = target;
+    if (path_.empty()) {
+        path_ = target;
+        syntax_.setFile(path_);
+    }
     if (target == path_) history_.markSaved();
     message_ = describe(target, countLines(*buffer_, *bytes), *bytes) + " written";
     return true;
@@ -1206,6 +1224,7 @@ void Editor::openLine(bool below) {
 }
 
 void Editor::applyEdit(Pos start, Pos end, const std::string& text) {
+    syntax_.invalidate(start.row);
     history_.record(buffer_->replace(start, end, text));
 }
 
@@ -1216,6 +1235,7 @@ void Editor::undo(int count) {
         if (!next) break;
         where = next;
     }
+    syntax_.invalidate(0);
     if (where) {
         placeCursor(*where);
     } else {
@@ -1230,6 +1250,7 @@ void Editor::redo(int count) {
         if (!next) break;
         where = next;
     }
+    syntax_.invalidate(0);
     if (where) {
         placeCursor(*where);
     } else {
