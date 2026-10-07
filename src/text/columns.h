@@ -21,6 +21,7 @@ namespace qalam {
 
     std::string truncateToWidth(const std::string& text, std::size_t width);
     std::vector<std::string> displayCells(const std::string& line);
+    std::vector<std::size_t> cellSources(const std::string& line);
     void popLastChar(std::string& text);
 
-}
+}  // namespace qalam
