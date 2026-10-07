@@ -13,6 +13,7 @@
 #include "motions/motions.h"
 #include "render/render.h"
 #include "search/search.h"
+#include "syntax/syntax.h"
 #include "terminal/terminal.h"
 #include "undo/history.h"
 
@@ -144,6 +145,7 @@ private:
     std::unique_ptr<TextBuffer> buffer_;
     UndoHistory history_;
     Keymap keymap_;
+    Syntax syntax_;
     std::map<std::string, std::string> aliases_;
     std::vector<Key> mapPending_;
     std::string configPath_;
