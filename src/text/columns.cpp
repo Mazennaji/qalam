@@ -206,6 +206,31 @@ std::vector<std::string> displayCells(const std::string& line) {
     return cells;
 }
 
+    std::vector<std::size_t> cellSources(const std::string& line) {
+    std::vector<std::size_t> sources;
+    std::size_t i = 0;
+
+    while (i < line.size()) {
+        const std::size_t length = charLength(line, i);
+        const auto lead = static_cast<unsigned char>(line[i]);
+
+        if (lead == '\t') {
+            const auto stop = static_cast<std::size_t>(kTabStop);
+            sources.insert(sources.end(), stop - sources.size() % stop, i);
+        } else if (length == 1 && (lead < 0x20 || lead >= 0x7F)) {
+            sources.push_back(i);
+        } else {
+            const std::size_t width = cellWidth(line, i, length, sources.size());
+            if (width > 0) {
+                sources.push_back(i);
+                if (width == 2) sources.push_back(i);
+            }
+        }
+        i += length;
+    }
+    return sources;
+}
+
 void popLastChar(std::string& text) {
     if (text.empty()) return;
     text.erase(prevCharStart(text, text.size()));
