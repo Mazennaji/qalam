@@ -6,6 +6,7 @@
 
 #include "buffer/pos.h"
 #include "buffer/text_buffer.h"
+#include "syntax/syntax.h"
 #include "terminal/terminal.h"
 
 namespace qalam {
@@ -21,6 +22,7 @@ namespace qalam {
 
     struct ViewState {
         const TextBuffer* buffer = nullptr;
+        const Syntax* syntax = nullptr;
         std::string mode;
         std::string fileName;
         std::string message;
