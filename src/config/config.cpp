@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <sstream>
 
@@ -62,6 +63,36 @@ bool parseAliasLine(const std::vector<std::string>& words, Config& config, std::
     return true;
 }
 
+bool parseColorLine(const std::vector<std::string>& words, Config& config, std::string& error) {
+    if (words.size() != 3) {
+        error = "usage: color NAME CODE (CODE is 0-255)";
+        return false;
+    }
+
+    static const char* const names[] = {"keyword", "type", "string",
+                                        "comment", "number", "preproc"};
+    const bool known = std::any_of(std::begin(names), std::end(names),
+                                   [&](const char* name) { return words[1] == name; });
+    if (!known) {
+        error = "unknown color name '" + words[1] + "'";
+        return false;
+    }
+
+    const std::string& value = words[2];
+    const bool digits = !value.empty() && value.size() <= 3 &&
+                        std::all_of(value.begin(), value.end(), [](char c) {
+                            return std::isdigit(static_cast<unsigned char>(c)) != 0;
+                        });
+    const int code = digits ? std::stoi(value) : -1;
+    if (code < 0 || code > 255) {
+        error = "color code must be between 0 and 255";
+        return false;
+    }
+
+    config.colors.emplace_back(words[1], code);
+    return true;
+}
+
 bool parseSetLine(const std::string& line, Config& config, std::string& error) {
     std::string flat = line;
     std::replace(flat.begin(), flat.end(), '=', ' ');
@@ -70,6 +101,18 @@ bool parseSetLine(const std::string& line, Config& config, std::string& error) {
     if (words.size() != 3) {
         error = "usage: set OPTION VALUE";
         return false;
+    }
+
+    if (words[1] == "syntax") {
+        if (words[2] == "on") {
+            config.syntax = true;
+        } else if (words[2] == "off") {
+            config.syntax = false;
+        } else {
+            error = "syntax must be on or off";
+            return false;
+        }
+        return true;
     }
 
     if (words[1] != "timeoutlen") {
@@ -101,6 +144,7 @@ bool parseLine(const std::string& line, Config& config, std::string& error) {
 
     if (command == "map") return parseMapLine(words, config, error);
     if (command == "alias") return parseAliasLine(words, config, error);
+    if (command == "color") return parseColorLine(words, config, error);
     if (command == "set") return parseSetLine(line, config, error);
 
     error = "unknown command '" + command + "'";
