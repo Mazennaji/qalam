@@ -42,7 +42,8 @@ void appendWelcome(std::string& out, int cols) {
 
 void appendTextRow(std::string& out, const std::string& line, std::size_t row, int colOffset,
                    int cols, const std::string& pattern,
-                   const std::optional<Selection>& selection) {
+                   const std::optional<Selection>& selection, const Syntax* syntax,
+                   const std::vector<Kind>* kinds) {
     const std::vector<std::string> cells = displayCells(line);
 
     const bool selected = selection && row >= selection->start.row && row <= selection->end.row;
@@ -84,6 +85,9 @@ void appendTextRow(std::string& out, const std::string& line, std::size_t row, i
         }
     }
 
+    std::vector<std::size_t> sources;
+    if (kinds != nullptr && syntax != nullptr) sources = cellSources(line);
+
     int current = 0;
     for (std::size_t i = start; i < end; ++i) {
         int want = 0;
@@ -91,11 +95,20 @@ void appendTextRow(std::string& out, const std::string& line, std::size_t row, i
             want = 2;
         } else if (!marked.empty() && marked[i]) {
             want = 1;
+        } else if (!sources.empty() && i < sources.size() && sources[i] < kinds->size()) {
+            const Kind kind = (*kinds)[sources[i]];
+            if (kind != Kind::Normal) want = 2 + static_cast<int>(kind);
         }
+
         if (want != current) {
             out += "\x1b[m";
-            if (want == 1) out += "\x1b[30;43m";
-            if (want == 2) out += "\x1b[7m";
+            if (want == 1) {
+                out += "\x1b[30;43m";
+            } else if (want == 2) {
+                out += "\x1b[7m";
+            } else if (want >= 3) {
+                out += syntax->sgr(static_cast<Kind>(want - 2));
+            }
             current = want;
         }
 
@@ -121,12 +134,15 @@ std::string renderFrame(Size size, const ViewState& view) {
 
     const int textRows = std::max(1, size.rows - 2);
     const std::size_t lineCount = view.buffer != nullptr ? view.buffer->lineCount() : 0;
+    const bool highlight = view.syntax != nullptr && view.syntax->active();
 
     for (int y = 0; y < textRows; ++y) {
         const std::size_t row = view.rowOffset + static_cast<std::size_t>(y);
         if (row < lineCount) {
+            const std::vector<Kind>* kinds = nullptr;
+            if (highlight) kinds = &view.syntax->kinds(*view.buffer, row);
             appendTextRow(out, view.buffer->line(row), row, view.colOffset, size.cols,
-                          view.searchPattern, view.selection);
+                          view.searchPattern, view.selection, view.syntax, kinds);
         } else if (view.showWelcome && y == textRows / 3) {
             appendWelcome(out, size.cols);
         } else {
