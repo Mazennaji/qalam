@@ -11,6 +11,7 @@
 #include "config/config.h"
 #include "input/keymap.h"
 #include "motions/motions.h"
+#include "motions/objects.h"
 #include "render/render.h"
 #include "search/search.h"
 #include "syntax/syntax.h"
@@ -65,6 +66,8 @@ private:
     };
 
     void dispatch(const Key& key);
+    void trackRepeat();
+    void repeatChange(int count);
     void resolveMaps(bool timedOut);
     bool canMap() const;
 
@@ -104,6 +107,11 @@ private:
     void deleteUnderCursor(int count);
     void openLine(bool below);
 
+    void joinLines(int count);
+    void toggleCase(int count);
+    void replaceChars(const std::string& with, int count);
+    void shiftLines(bool right, std::size_t first, std::size_t last);
+
     void applyEdit(Pos start, Pos end, const std::string& text);
     void undo(int count);
     void redo(int count);
@@ -117,6 +125,7 @@ private:
     std::optional<Motion> operatorMotion(const Key& key, bool wasPendingG, int count,
                                          bool counted) const;
     void operate(char op, const Motion& motion);
+    void operateRange(char op, const TextRange& range);
     void put(bool after, int count);
     void putBlock(bool after, int count);
 
@@ -148,6 +157,8 @@ private:
     Syntax syntax_;
     std::map<std::string, std::string> aliases_;
     std::vector<Key> mapPending_;
+    std::vector<Key> cmdKeys_;
+    std::vector<Key> lastChange_;
     std::string configPath_;
     std::string path_;
     std::string message_;
@@ -168,11 +179,17 @@ private:
     BlockInsert blockInsert_;
     int count_ = 0;
     int opCount_ = 0;
+    int replaceCount_ = 1;
     int mapTicks_ = 0;
     int timeoutTicks_ = 5;
     char visualKind_ = 'v';
     char pendingFind_ = 0;
     char pendingOp_ = 0;
+    char pendingObject_ = 0;
+    bool pendingReplace_ = false;
+    bool replaying_ = false;
+    bool changed_ = false;
+    bool tainted_ = false;
     bool searchForward_ = true;
     bool lastForward_ = true;
     bool highlight_ = false;
