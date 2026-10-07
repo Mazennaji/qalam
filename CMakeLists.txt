@@ -41,6 +41,8 @@ add_executable(qalam
         src/render/render.h
         src/editor/editor.cpp
         src/editor/editor.h
+        src/syntax/syntax.cpp
+        src/syntax/syntax.h
 )
 
 target_include_directories(qalam PRIVATE src)
