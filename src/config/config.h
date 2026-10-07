@@ -18,8 +18,10 @@ namespace qalam {
     struct Config {
         std::vector<Mapping> mappings;
         std::map<std::string, std::string> aliases;
+        std::vector<std::pair<std::string, int>> colors;
         std::vector<std::string> errors;
         int timeoutMs = 500;
+        bool syntax = true;
         bool found = false;
     };
 
