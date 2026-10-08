@@ -17,6 +17,7 @@
 #include "syntax/syntax.h"
 #include "terminal/terminal.h"
 #include "undo/history.h"
+#include "window/layout.h"
 
 namespace qalam {
 
@@ -55,6 +56,16 @@ private:
         std::unique_ptr<TextBuffer> buffer;
         UndoHistory history;
         std::string path;
+        std::size_t row = 0;
+        std::size_t col = 0;
+        std::size_t wantedCol = 0;
+        std::size_t rowOff = 0;
+        int colOff = 0;
+    };
+
+    struct Window {
+        int id = 0;
+        std::size_t doc = 0;
         std::size_t row = 0;
         std::size_t col = 0;
         std::size_t wantedCol = 0;
@@ -105,6 +116,18 @@ private:
     bool docModified(std::size_t index) const;
     int modifiedBuffer(bool skipCurrent) const;
     std::string bufferInfo() const;
+
+    Rect screenArea() const;
+    Rect activeRect() const;
+    std::size_t indexOfWindow(int id) const;
+    void saveWindow();
+    void loadWindow(std::size_t index);
+    void focusWindow(std::size_t index);
+    void cycleWindow(bool forward);
+    void splitWindow(bool sideBySide, const std::string& path);
+    void closeWindow();
+    void onlyWindow();
+    void handleWindowKey(const Key& key);
 
     void enterVisual(char kind);
     void leaveVisual();
@@ -180,6 +203,9 @@ private:
     UndoHistory history_;
     std::vector<Doc> docs_;
     std::size_t current_ = 0;
+    Layout layout_;
+    std::vector<Window> windows_;
+    std::size_t activeWin_ = 0;
     Keymap keymap_;
     Syntax syntax_;
     std::map<std::string, std::string> aliases_;
@@ -214,6 +240,7 @@ private:
     char pendingOp_ = 0;
     char pendingObject_ = 0;
     bool pendingReplace_ = false;
+    bool pendingWindow_ = false;
     bool replaying_ = false;
     bool changed_ = false;
     bool tainted_ = false;
