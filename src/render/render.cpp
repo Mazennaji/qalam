@@ -26,7 +26,13 @@ std::string fitWidth(std::string left, const std::string& right, int width) {
     return left;
 }
 
-void appendWelcome(std::string& out, int cols) {
+std::string moveTo(int row, int col) {
+    return "\x1b[" + std::to_string(row) + ";" + std::to_string(col) + "H";
+}
+
+std::size_t appendWelcome(std::string& out, int cols) {
+    const std::size_t before = out.size();
+
     std::string text = "qalam -- the pen for your terminal";
     const auto w = static_cast<std::size_t>(std::max(cols, 0));
     if (text.size() > w) text.resize(w);
@@ -38,22 +44,26 @@ void appendWelcome(std::string& out, int cols) {
     }
     out.append(static_cast<std::size_t>(std::max(padding, 0)), ' ');
     out += text;
+    return out.size() - before;
 }
 
-void appendTextRow(std::string& out, const std::string& line, std::size_t row, int colOffset,
-                   int cols, const std::string& pattern,
-                   const std::optional<Selection>& selection, const Syntax* syntax,
-                   const std::vector<Kind>* kinds) {
+std::size_t appendTextRow(std::string& out, const std::string& line, std::size_t row,
+                          int colOffset, int cols, const std::string& pattern,
+                          const std::optional<Selection>& selection, const Syntax* syntax,
+                          const std::vector<Kind>* kinds) {
     const std::vector<std::string> cells = displayCells(line);
 
     const bool selected = selection && row >= selection->start.row && row <= selection->end.row;
     if (cells.empty()) {
-        if (selected) out += "\x1b[7m \x1b[m";
-        return;
+        if (selected) {
+            out += "\x1b[7m \x1b[m";
+            return 1;
+        }
+        return 0;
     }
 
     const auto start = static_cast<std::size_t>(std::max(colOffset, 0));
-    if (start >= cells.size()) return;
+    if (start >= cells.size()) return 0;
     const std::size_t end =
         std::min(cells.size(), start + static_cast<std::size_t>(std::max(cols, 0)));
 
@@ -121,57 +131,87 @@ void appendTextRow(std::string& out, const std::string& line, std::size_t row, i
         out += cut ? std::string(" ") : glyph;
     }
     if (current != 0) out += "\x1b[m";
+    return end - start;
 }
 
 }
 
 std::string renderFrame(Size size, const ViewState& view) {
     std::string out;
-    out.reserve(static_cast<std::size_t>(size.rows) * static_cast<std::size_t>(size.cols));
+    out.reserve(static_cast<std::size_t>(size.rows) * static_cast<std::size_t>(size.cols) * 2);
 
     out += "\x1b[?25l";
-    out += "\x1b[H";
+    out += "\x1b[m";
 
-    const int textRows = std::max(1, size.rows - 2);
-    const std::size_t lineCount = view.buffer != nullptr ? view.buffer->lineCount() : 0;
-    const bool highlight = view.syntax != nullptr && view.syntax->active();
+    int cursorRow = 1;
+    int cursorCol = 1;
 
-    for (int y = 0; y < textRows; ++y) {
-        const std::size_t row = view.rowOffset + static_cast<std::size_t>(y);
-        if (row < lineCount) {
-            const std::vector<Kind>* kinds = nullptr;
-            if (highlight) kinds = &view.syntax->kinds(*view.buffer, row);
-            appendTextRow(out, view.buffer->line(row), row, view.colOffset, size.cols,
-                          view.searchPattern, view.selection, view.syntax, kinds);
-        } else if (view.showWelcome && y == textRows / 3) {
-            appendWelcome(out, size.cols);
-        } else {
-            out += '~';
+    for (const WindowView& w : view.windows) {
+        if (w.rect.rows < 2 || w.rect.cols < 1) continue;
+
+        const int textRows = w.rect.rows - 1;
+        const auto width = static_cast<std::size_t>(w.rect.cols);
+        const std::size_t lineCount = w.buffer != nullptr ? w.buffer->lineCount() : 0;
+        const bool highlight = w.syntax != nullptr && w.syntax->active();
+
+        for (int y = 0; y < textRows; ++y) {
+            out += moveTo(w.rect.row + y + 1, w.rect.col + 1);
+
+            const std::size_t row = w.rowOffset + static_cast<std::size_t>(y);
+            std::size_t used = 0;
+            if (row < lineCount) {
+                const std::vector<Kind>* kinds = nullptr;
+                if (highlight) kinds = &w.syntax->kinds(*w.buffer, row);
+                used = appendTextRow(out, w.buffer->line(row), row, w.colOffset, w.rect.cols,
+                                     view.searchPattern, w.selection, w.syntax, kinds);
+            } else if (w.showWelcome && y == textRows / 3) {
+                used = appendWelcome(out, w.rect.cols);
+            } else {
+                out += '~';
+                used = 1;
+            }
+            if (used < width) out.append(width - used, ' ');
         }
-        out += "\x1b[K\r\n";
+
+        const std::string name = w.fileName.empty() ? "[No Name]" : w.fileName;
+        const std::string flag = w.modified ? " [+]" : "";
+        const std::string left =
+            w.active ? " " + w.mode + " | " + name + flag : " " + name + flag;
+        const std::string right =
+            "Ln " + std::to_string(w.line + 1) + ", Col " + std::to_string(w.col + 1) + " ";
+
+        out += moveTo(w.rect.row + textRows + 1, w.rect.col + 1);
+        out += w.active ? "\x1b[7m" : "\x1b[7;2m";
+        out += fitWidth(left, right, w.rect.cols);
+        out += "\x1b[m";
+
+        if (w.active) {
+            const int row = std::clamp(w.cursorRow, 0, textRows - 1);
+            const int col = std::clamp(w.cursorCol, 0, w.rect.cols - 1);
+            cursorRow = w.rect.row + row + 1;
+            cursorCol = w.rect.col + col + 1;
+        }
     }
 
-    const std::string name = view.fileName.empty() ? "[No Name]" : view.fileName;
-    const std::string left = " " + view.mode + " | " + name + (view.modified ? " [+]" : "");
-    const std::string right =
-        "Ln " + std::to_string(view.line + 1) + ", Col " + std::to_string(view.col + 1) + " ";
-    out += "\x1b[7m";
-    out += fitWidth(left, right, size.cols);
-    out += "\x1b[m\r\n";
+    for (const Rect& s : view.separators) {
+        for (int r = 0; r < s.rows; ++r) {
+            out += moveTo(s.row + r + 1, s.col + 1);
+            out += "\xe2\x94\x82";
+        }
+    }
 
     const auto w = static_cast<std::size_t>(std::max(size.cols, 0));
     const std::string msg = truncateToWidth(view.message, w);
+    out += moveTo(size.rows, 1);
     out += msg;
     out += "\x1b[K";
 
-    int cursorRow = view.cursorRow + 1;
-    int cursorCol = view.cursorCol + 1;
     if (view.commandLine) {
         cursorRow = size.rows;
         cursorCol = std::min(displayWidth(msg) + 1, std::max(size.cols, 1));
     }
 
-    out += "\x1b[" + std::to_string(cursorRow) + ";" + std::to_string(cursorCol) + "H";
+    out += moveTo(cursorRow, cursorCol);
     out += "\x1b[?25h";
     return out;
 }
