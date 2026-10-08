@@ -27,6 +27,8 @@ public:
     explicit Editor(std::unique_ptr<TextBuffer> buffer);
 
     void open(const std::string& path);
+    void edit(const std::string& path);
+    void selectBuffer(std::size_t index);
     bool useConfig(const std::string& path);
     void resize(Size size);
     void handleKey(const Key& key);
@@ -47,6 +49,17 @@ private:
         std::vector<std::string> rows;
         bool linewise = false;
         bool block = false;
+    };
+
+    struct Doc {
+        std::unique_ptr<TextBuffer> buffer;
+        UndoHistory history;
+        std::string path;
+        std::size_t row = 0;
+        std::size_t col = 0;
+        std::size_t wantedCol = 0;
+        std::size_t rowOff = 0;
+        int colOff = 0;
     };
 
     struct BlockInsert {
@@ -79,7 +92,19 @@ private:
     void handleVisualKey(const Key& key);
     void runCommand(const std::string& text);
     bool save(const std::string& argument);
-    void requestQuit(bool force);
+    void requestQuit(bool force, bool skipCurrent = false);
+
+    void stash();
+    void activate(std::size_t index);
+    void switchBuffer(std::size_t index);
+    void closeBuffer(bool force);
+    void gotoBuffer(const std::string& argument);
+    void listBuffers();
+    bool saveAll();
+    std::string docPath(std::size_t index) const;
+    bool docModified(std::size_t index) const;
+    int modifiedBuffer(bool skipCurrent) const;
+    std::string bufferInfo() const;
 
     void enterVisual(char kind);
     void leaveVisual();
@@ -153,6 +178,8 @@ private:
 
     std::unique_ptr<TextBuffer> buffer_;
     UndoHistory history_;
+    std::vector<Doc> docs_;
+    std::size_t current_ = 0;
     Keymap keymap_;
     Syntax syntax_;
     std::map<std::string, std::string> aliases_;
