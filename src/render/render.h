@@ -3,11 +3,13 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "buffer/pos.h"
 #include "buffer/text_buffer.h"
 #include "syntax/syntax.h"
 #include "terminal/terminal.h"
+#include "window/layout.h"
 
 namespace qalam {
 
@@ -20,23 +22,30 @@ namespace qalam {
         std::size_t right = 0;
     };
 
-    struct ViewState {
+    struct WindowView {
         const TextBuffer* buffer = nullptr;
         const Syntax* syntax = nullptr;
+        Rect rect;
+        bool active = false;
         std::string mode;
         std::string fileName;
-        std::string message;
-        std::string searchPattern;
-        std::optional<Selection> selection;
         bool modified = false;
-        bool commandLine = false;
         bool showWelcome = false;
+        std::optional<Selection> selection;
         std::size_t rowOffset = 0;
         int colOffset = 0;
         std::size_t line = 0;
         std::size_t col = 0;
         int cursorRow = 0;
         int cursorCol = 0;
+    };
+
+    struct ViewState {
+        std::vector<WindowView> windows;
+        std::vector<Rect> separators;
+        std::string message;
+        std::string searchPattern;
+        bool commandLine = false;
     };
 
     std::string renderFrame(Size size, const ViewState& view);
