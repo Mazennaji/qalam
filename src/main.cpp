@@ -16,7 +16,8 @@ int main(int argc, char** argv) {
         AlternateScreen screen;
 
         Editor editor(std::make_unique<LineBuffer>());
-        if (argc > 1) editor.open(argv[1]);
+        for (int i = 1; i < argc; ++i) editor.edit(argv[i]);
+        if (argc > 2) editor.selectBuffer(0);
         editor.useConfig(defaultConfigPath());
 
         Size size = windowSize();
