@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "buffer/file_io.h"
+#include "buffer/line_buffer.h"
 #include "search/substitute.h"
 #include "text/columns.h"
 
@@ -166,7 +167,9 @@ Parse parseSubstitute(const std::string& text, std::size_t current, std::size_t 
 
 }
 
-Editor::Editor(std::unique_ptr<TextBuffer> buffer) : buffer_(std::move(buffer)) {}
+Editor::Editor(std::unique_ptr<TextBuffer> buffer) : buffer_(std::move(buffer)) {
+    docs_.emplace_back();
+}
 
 void Editor::open(const std::string& path) {
     const LoadResult result = loadFile(path, *buffer_);
@@ -359,6 +362,11 @@ ViewState Editor::view() const {
             break;
     }
     v.fileName = path_;
+    if (docs_.size() > 1) {
+        const std::string name = path_.empty() ? "[No Name]" : path_;
+        v.fileName = name + " (" + std::to_string(current_ + 1) + "/" +
+                     std::to_string(docs_.size()) + ")";
+    }
     v.modified = history_.modified();
     v.commandLine = mode_ == Mode::Command || mode_ == Mode::Search;
     if (mode_ == Mode::Command) {
@@ -894,10 +902,41 @@ void Editor::runCommand(const std::string& text) {
 
     if (name == "w" || name == "write") {
         save(argument);
-    } else if (name == "q" || name == "quit" || name == "khalas") {
+    } else if (name == "q" || name == "quit" || name == "khalas" || name == "qa" ||
+               name == "qall") {
         requestQuit(force);
     } else if (name == "wq" || name == "x") {
-        if (save(argument)) requestQuit(true);
+        if (save(argument)) requestQuit(false, true);
+    } else if (name == "wa" || name == "wall") {
+        saveAll();
+    } else if (name == "wqa" || name == "xa") {
+        if (saveAll()) quit_ = true;
+    } else if (name == "e" || name == "edit") {
+        if (!argument.empty()) {
+            edit(argument);
+        } else if (path_.empty()) {
+            message_ = "No file name";
+        } else if (history_.modified() && !force) {
+            message_ = "No write since last change (add ! to override)";
+        } else {
+            open(path_);
+        }
+    } else if (name == "bn" || name == "bnext" || name == "bp" || name == "bprev" ||
+               name == "bprevious") {
+        if (docs_.size() < 2) {
+            message_ = "Only one buffer";
+        } else {
+            const bool forward = name == "bn" || name == "bnext";
+            const std::size_t count = docs_.size();
+            switchBuffer(forward ? (current_ + 1) % count : (current_ + count - 1) % count);
+            message_ = bufferInfo();
+        }
+    } else if (name == "b" || name == "buffer") {
+        gotoBuffer(argument);
+    } else if (name == "ls" || name == "buffers") {
+        listBuffers();
+    } else if (name == "bd" || name == "bdelete") {
+        closeBuffer(force);
     } else if (name == "noh" || name == "nohlsearch") {
         highlight_ = false;
     } else if (name == "syntax") {
@@ -943,12 +982,233 @@ bool Editor::save(const std::string& argument) {
     return true;
 }
 
-void Editor::requestQuit(bool force) {
+void Editor::requestQuit(bool force, bool skipCurrent) {
+    if (!force) {
+        const int index = modifiedBuffer(skipCurrent);
+        if (index >= 0) {
+            if (static_cast<std::size_t>(index) == current_) {
+                message_ = "No write since last change (add ! to override)";
+            } else {
+                message_ = "No write since last change in buffer " +
+                           std::to_string(index + 1) + " (add ! to override)";
+            }
+            return;
+        }
+    }
+    quit_ = true;
+}
+
+std::string Editor::docPath(std::size_t index) const {
+    return index == current_ ? path_ : docs_[index].path;
+}
+
+bool Editor::docModified(std::size_t index) const {
+    return index == current_ ? history_.modified() : docs_[index].history.modified();
+}
+
+int Editor::modifiedBuffer(bool skipCurrent) const {
+    for (std::size_t i = 0; i < docs_.size(); ++i) {
+        if (skipCurrent && i == current_) continue;
+        if (docModified(i)) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+std::string Editor::bufferInfo() const {
+    const std::string name = path_.empty() ? "[No Name]" : path_;
+    return "buffer " + std::to_string(current_ + 1) + "/" + std::to_string(docs_.size()) +
+           ": " + name;
+}
+
+void Editor::stash() {
+    Doc& doc = docs_[current_];
+    doc.buffer = std::move(buffer_);
+    doc.history = std::move(history_);
+    doc.path = path_;
+    doc.row = row_;
+    doc.col = col_;
+    doc.wantedCol = wantedCol_;
+    doc.rowOff = rowOff_;
+    doc.colOff = colOff_;
+}
+
+void Editor::activate(std::size_t index) {
+    Doc& doc = docs_[index];
+    buffer_ = std::move(doc.buffer);
+    history_ = std::move(doc.history);
+    path_ = doc.path;
+    row_ = doc.row;
+    col_ = doc.col;
+    wantedCol_ = doc.wantedCol;
+    rowOff_ = doc.rowOff;
+    colOff_ = doc.colOff;
+    current_ = index;
+
+    mode_ = Mode::Normal;
+    blockInsert_.active = false;
+    cmdKeys_.clear();
+    resetPending();
+    syntax_.setFile(path_);
+    row_ = std::min(row_, buffer_->lineCount() - 1);
+    col_ = snapToStart(buffer_->line(row_), std::min(col_, maxColumn(row_)));
+}
+
+void Editor::switchBuffer(std::size_t index) {
+    if (index == current_ || index >= docs_.size()) return;
+    stash();
+    activate(index);
+}
+
+void Editor::selectBuffer(std::size_t index) {
+    if (index >= docs_.size()) return;
+    switchBuffer(index);
+    message_ = bufferInfo();
+    scroll();
+}
+
+void Editor::edit(const std::string& path) {
+    if (path.empty()) {
+        message_ = "usage: :e FILE";
+        return;
+    }
+
+    for (std::size_t i = 0; i < docs_.size(); ++i) {
+        if (docPath(i) == path) {
+            switchBuffer(i);
+            message_ = bufferInfo();
+            scroll();
+            return;
+        }
+    }
+
+    const bool pristine = path_.empty() && !history_.modified() &&
+                          buffer_->lineCount() == 1 && buffer_->line(0).empty();
+    if (!pristine) {
+        stash();
+        Doc fresh;
+        fresh.buffer = std::make_unique<LineBuffer>();
+        docs_.push_back(std::move(fresh));
+        activate(docs_.size() - 1);
+    }
+
+    open(path);
+
+    if (path_.empty() && !pristine) {
+        const std::string failure = message_;
+        closeBuffer(true);
+        message_ = failure;
+    }
+}
+
+void Editor::closeBuffer(bool force) {
     if (history_.modified() && !force) {
         message_ = "No write since last change (add ! to override)";
         return;
     }
-    quit_ = true;
+
+    if (docs_.size() == 1) {
+        buffer_ = std::make_unique<LineBuffer>();
+        history_.clear();
+        path_.clear();
+        row_ = 0;
+        col_ = 0;
+        wantedCol_ = 0;
+        rowOff_ = 0;
+        colOff_ = 0;
+        mode_ = Mode::Normal;
+        resetPending();
+        syntax_.setFile("");
+        message_ = "Buffer closed";
+        return;
+    }
+
+    const std::size_t next = current_ + 1 < docs_.size() ? current_ : current_ - 1;
+    docs_.erase(docs_.begin() + static_cast<std::ptrdiff_t>(current_));
+    activate(next);
+    message_ = bufferInfo();
+}
+
+void Editor::gotoBuffer(const std::string& argument) {
+    if (argument.empty()) {
+        message_ = "usage: :b N|NAME";
+        return;
+    }
+
+    const bool numeric = std::all_of(argument.begin(), argument.end(), [](char c) {
+        return std::isdigit(static_cast<unsigned char>(c)) != 0;
+    });
+
+    if (numeric) {
+        const std::size_t n = argument.size() > 6 ? 0 : std::stoul(argument);
+        if (n < 1 || n > docs_.size()) {
+            message_ = "No buffer " + argument;
+            return;
+        }
+        switchBuffer(n - 1);
+        message_ = bufferInfo();
+        return;
+    }
+
+    std::size_t found = 0;
+    std::size_t matches = 0;
+    for (std::size_t i = 0; i < docs_.size(); ++i) {
+        if (docPath(i).find(argument) != std::string::npos) {
+            found = i;
+            ++matches;
+        }
+    }
+    if (matches == 0) {
+        message_ = "No matching buffer for " + argument;
+    } else if (matches > 1) {
+        message_ = "More than one match for " + argument;
+    } else {
+        switchBuffer(found);
+        message_ = bufferInfo();
+    }
+}
+
+void Editor::listBuffers() {
+    std::string text;
+    for (std::size_t i = 0; i < docs_.size(); ++i) {
+        if (i > 0) text += "  ";
+        text += std::to_string(i + 1);
+        if (i == current_) text += '%';
+        if (docModified(i)) text += '+';
+        const std::string name = docPath(i);
+        text += ' ';
+        text += name.empty() ? "[No Name]" : name;
+    }
+    message_ = text;
+}
+
+bool Editor::saveAll() {
+    std::size_t saved = 0;
+    std::size_t skipped = 0;
+
+    for (std::size_t i = 0; i < docs_.size(); ++i) {
+        if (i == current_) {
+            if (!history_.modified()) continue;
+            if (!path_.empty() && save("")) {
+                ++saved;
+            } else {
+                ++skipped;
+            }
+            continue;
+        }
+
+        Doc& doc = docs_[i];
+        if (!doc.history.modified()) continue;
+        if (doc.path.empty() || !saveFile(doc.path, *doc.buffer)) {
+            ++skipped;
+            continue;
+        }
+        doc.history.markSaved();
+        ++saved;
+    }
+
+    message_ = std::to_string(saved) + (saved == 1 ? " buffer" : " buffers") + " written";
+    if (skipped > 0) message_ += ", " + std::to_string(skipped) + " not written";
+    return skipped == 0;
 }
 
 void Editor::enterVisual(char kind) {
