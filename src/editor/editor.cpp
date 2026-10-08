@@ -169,6 +169,7 @@ Parse parseSubstitute(const std::string& text, std::size_t current, std::size_t 
 
 Editor::Editor(std::unique_ptr<TextBuffer> buffer) : buffer_(std::move(buffer)) {
     docs_.emplace_back();
+    windows_.emplace_back();
 }
 
 void Editor::open(const std::string& path) {
@@ -254,7 +255,7 @@ bool Editor::canMap() const {
             return true;
         case Mode::Normal:
             return pendingOp_ == 0 && pendingFind_ == 0 && !pendingG_ && !pendingReplace_ &&
-                   pendingObject_ == 0 && count_ == 0 && opCount_ == 0;
+                   !pendingWindow_ && pendingObject_ == 0 && count_ == 0 && opCount_ == 0;
         case Mode::Visual:
             return pendingFind_ == 0 && !pendingG_ && count_ == 0;
         case Mode::Command:
@@ -350,24 +351,18 @@ bool Editor::shouldQuit() const {
 
 ViewState Editor::view() const {
     ViewState v;
-    v.buffer = buffer_.get();
-    v.syntax = &syntax_;
+
+    std::string modeName;
     switch (mode_) {
-        case Mode::Normal: v.mode = "NORMAL"; break;
-        case Mode::Insert: v.mode = "INSERT"; break;
-        case Mode::Command: v.mode = "COMMAND"; break;
-        case Mode::Search: v.mode = "SEARCH"; break;
+        case Mode::Normal: modeName = "NORMAL"; break;
+        case Mode::Insert: modeName = "INSERT"; break;
+        case Mode::Command: modeName = "COMMAND"; break;
+        case Mode::Search: modeName = "SEARCH"; break;
         case Mode::Visual:
-            v.mode = visualKind_ == 'V' ? "V-LINE" : visualKind_ == 'B' ? "V-BLOCK" : "VISUAL";
+            modeName = visualKind_ == 'V' ? "V-LINE" : visualKind_ == 'B' ? "V-BLOCK" : "VISUAL";
             break;
     }
-    v.fileName = path_;
-    if (docs_.size() > 1) {
-        const std::string name = path_.empty() ? "[No Name]" : path_;
-        v.fileName = name + " (" + std::to_string(current_ + 1) + "/" +
-                     std::to_string(docs_.size()) + ")";
-    }
-    v.modified = history_.modified();
+
     v.commandLine = mode_ == Mode::Command || mode_ == Mode::Search;
     if (mode_ == Mode::Command) {
         v.message = ":" + commandText_;
@@ -385,32 +380,98 @@ ViewState Editor::view() const {
     } else if (highlight_) {
         v.searchPattern = lastSearch_;
     }
-    if (mode_ == Mode::Visual) {
-        Pos a = anchor_;
-        Pos b{row_, col_};
-        if (b < a) std::swap(a, b);
-        Selection selection{a, b, visualKind_ == 'V'};
-        if (visualKind_ == 'B') {
-            const BlockBounds bounds = blockBounds();
-            selection.block = true;
-            selection.left = bounds.left;
-            selection.right = bounds.right;
+
+    auto title = [&](std::size_t doc) {
+        std::string name = docPath(doc);
+        if (docs_.size() > 1) {
+            if (name.empty()) name = "[No Name]";
+            name += " (" + std::to_string(doc + 1) + "/" + std::to_string(docs_.size()) + ")";
         }
-        v.selection = selection;
+        return name;
+    };
+
+    std::vector<Rect> separators;
+    const std::vector<Placement> placed = layout_.place(screenArea(), &separators);
+    v.separators = std::move(separators);
+
+    for (const Placement& p : placed) {
+        const std::size_t index = indexOfWindow(p.id);
+        WindowView w;
+        w.rect = p.rect;
+        w.active = index == activeWin_;
+
+        if (w.active) {
+            w.buffer = buffer_.get();
+            w.syntax = &syntax_;
+            w.mode = modeName;
+            w.fileName = title(current_);
+            w.modified = history_.modified();
+            if (mode_ == Mode::Visual) {
+                Pos a = anchor_;
+                Pos b{row_, col_};
+                if (b < a) std::swap(a, b);
+                Selection selection{a, b, visualKind_ == 'V'};
+                if (visualKind_ == 'B') {
+                    const BlockBounds bounds = blockBounds();
+                    selection.block = true;
+                    selection.left = bounds.left;
+                    selection.right = bounds.right;
+                }
+                w.selection = selection;
+            }
+            w.showWelcome =
+                path_.empty() && buffer_->lineCount() == 1 && buffer_->line(0).empty();
+            w.rowOffset = rowOff_;
+            w.colOffset = colOff_;
+            w.line = row_;
+            w.col = static_cast<std::size_t>(renderColumn());
+            w.cursorRow = static_cast<int>(row_ - rowOff_);
+            w.cursorCol = renderColumn() - colOff_;
+        } else {
+            const Window& win = windows_[index];
+            const std::size_t doc = std::min(win.doc, docs_.size() - 1);
+            w.buffer = doc == current_ ? buffer_.get() : docs_[doc].buffer.get();
+            w.syntax = doc == current_ ? &syntax_ : nullptr;
+            w.fileName = title(doc);
+            w.modified = docModified(doc);
+
+            const TextBuffer& text = *w.buffer;
+            const std::size_t r = std::min(win.row, text.lineCount() - 1);
+            const std::string& line = text.line(r);
+            const std::size_t limit = line.empty() ? 0 : prevCharStart(line, line.size());
+            const std::size_t c = snapToStart(line, std::min(win.col, limit));
+            const int column = displayColumn(line, c);
+
+            const auto rows = static_cast<std::size_t>(std::max(1, p.rect.rows - 1));
+            const int width = std::max(1, p.rect.cols);
+            std::size_t rowOffset = win.rowOff;
+            if (r < rowOffset) rowOffset = r;
+            if (r >= rowOffset + rows) rowOffset = r - rows + 1;
+            int colOffset = win.colOff;
+            if (column < colOffset) colOffset = column;
+            if (column >= colOffset + width) colOffset = column - width + 1;
+
+            w.rowOffset = rowOffset;
+            w.colOffset = colOffset;
+            w.line = r;
+            w.col = static_cast<std::size_t>(column);
+            w.cursorRow = static_cast<int>(r - rowOffset);
+            w.cursorCol = column - colOffset;
+        }
+        v.windows.push_back(std::move(w));
     }
-    v.showWelcome = path_.empty() && buffer_->lineCount() == 1 && buffer_->line(0).empty();
-    v.rowOffset = rowOff_;
-    v.colOffset = colOff_;
-    v.line = row_;
-    v.col = static_cast<std::size_t>(renderColumn());
-    v.cursorRow = static_cast<int>(row_ - rowOff_);
-    v.cursorCol = renderColumn() - colOff_;
     return v;
 }
 
 void Editor::handleNormalKey(const Key& key) {
     const bool wasPendingG = pendingG_;
     pendingG_ = false;
+
+    if (pendingWindow_) {
+        pendingWindow_ = false;
+        handleWindowKey(key);
+        return;
+    }
 
     if (pendingFind_ != 0) {
         const char kind = pendingFind_;
@@ -519,6 +580,8 @@ void Editor::handleNormalKey(const Key& key) {
                 redo(n);
             } else if (key.ch == 'v') {
                 enterVisual('B');
+            } else if (key.ch == 'w') {
+                pendingWindow_ = true;
             }
             return;
         case KeyType::Char: break;
@@ -902,11 +965,22 @@ void Editor::runCommand(const std::string& text) {
 
     if (name == "w" || name == "write") {
         save(argument);
-    } else if (name == "q" || name == "quit" || name == "khalas" || name == "qa" ||
-               name == "qall") {
+    } else if (name == "q" || name == "quit" || name == "khalas") {
+        if (windows_.size() > 1) {
+            closeWindow();
+        } else {
+            requestQuit(force);
+        }
+    } else if (name == "qa" || name == "qall") {
         requestQuit(force);
     } else if (name == "wq" || name == "x") {
-        if (save(argument)) requestQuit(false, true);
+        if (save(argument)) {
+            if (windows_.size() > 1) {
+                closeWindow();
+            } else {
+                requestQuit(false, true);
+            }
+        }
     } else if (name == "wa" || name == "wall") {
         saveAll();
     } else if (name == "wqa" || name == "xa") {
@@ -937,6 +1011,14 @@ void Editor::runCommand(const std::string& text) {
         listBuffers();
     } else if (name == "bd" || name == "bdelete") {
         closeBuffer(force);
+    } else if (name == "sp" || name == "split") {
+        splitWindow(false, argument);
+    } else if (name == "vs" || name == "vsp" || name == "vsplit") {
+        splitWindow(true, argument);
+    } else if (name == "close" || name == "clo") {
+        closeWindow();
+    } else if (name == "only" || name == "on") {
+        onlyWindow();
     } else if (name == "noh" || name == "nohlsearch") {
         highlight_ = false;
     } else if (name == "syntax") {
@@ -1122,9 +1204,18 @@ void Editor::closeBuffer(bool force) {
         return;
     }
 
+    const std::size_t gone = current_;
     const std::size_t next = current_ + 1 < docs_.size() ? current_ : current_ - 1;
     docs_.erase(docs_.begin() + static_cast<std::ptrdiff_t>(current_));
+    for (Window& w : windows_) {
+        if (w.doc == gone) {
+            w.doc = next;
+        } else if (w.doc > gone) {
+            --w.doc;
+        }
+    }
     activate(next);
+    windows_[activeWin_].doc = current_;
     message_ = bufferInfo();
 }
 
@@ -1209,6 +1300,158 @@ bool Editor::saveAll() {
     message_ = std::to_string(saved) + (saved == 1 ? " buffer" : " buffers") + " written";
     if (skipped > 0) message_ += ", " + std::to_string(skipped) + " not written";
     return skipped == 0;
+}
+
+Rect Editor::screenArea() const {
+    return {0, 0, std::max(1, size_.rows - 1), std::max(1, size_.cols)};
+}
+
+Rect Editor::activeRect() const {
+    return layout_.rectOf(screenArea(), windows_[activeWin_].id).value_or(screenArea());
+}
+
+std::size_t Editor::indexOfWindow(int id) const {
+    for (std::size_t i = 0; i < windows_.size(); ++i) {
+        if (windows_[i].id == id) return i;
+    }
+    return activeWin_;
+}
+
+void Editor::saveWindow() {
+    Window& w = windows_[activeWin_];
+    w.doc = current_;
+    w.row = row_;
+    w.col = col_;
+    w.wantedCol = wantedCol_;
+    w.rowOff = rowOff_;
+    w.colOff = colOff_;
+}
+
+void Editor::loadWindow(std::size_t index) {
+    activeWin_ = index;
+    const Window w = windows_[index];
+
+    const std::size_t doc = std::min(w.doc, docs_.size() - 1);
+    if (doc != current_) {
+        stash();
+        activate(doc);
+    }
+
+    mode_ = Mode::Normal;
+    blockInsert_.active = false;
+    cmdKeys_.clear();
+    resetPending();
+
+    row_ = std::min(w.row, buffer_->lineCount() - 1);
+    col_ = snapToStart(buffer_->line(row_), std::min(w.col, maxColumn(row_)));
+    wantedCol_ = w.wantedCol;
+    rowOff_ = w.rowOff;
+    colOff_ = w.colOff;
+}
+
+void Editor::focusWindow(std::size_t index) {
+    if (index >= windows_.size() || index == activeWin_) return;
+    saveWindow();
+    loadWindow(index);
+}
+
+void Editor::cycleWindow(bool forward) {
+    const std::vector<int> order = layout_.order();
+    if (order.size() < 2) return;
+
+    const int id = windows_[activeWin_].id;
+    std::size_t pos = 0;
+    while (pos < order.size() && order[pos] != id) ++pos;
+
+    const std::size_t next = forward ? (pos + 1) % order.size()
+                                     : (pos + order.size() - 1) % order.size();
+    focusWindow(indexOfWindow(order[next]));
+}
+
+void Editor::splitWindow(bool sideBySide, const std::string& path) {
+    const Rect area = activeRect();
+    if (sideBySide ? area.cols < 21 : area.rows < 6) {
+        message_ = "Not enough room to split";
+        return;
+    }
+
+    saveWindow();
+    const int id = layout_.split(windows_[activeWin_].id, sideBySide);
+    if (id < 0) return;
+
+    Window fresh = windows_[activeWin_];
+    fresh.id = id;
+    windows_.push_back(fresh);
+    activeWin_ = windows_.size() - 1;
+
+    if (!path.empty()) edit(path);
+}
+
+void Editor::closeWindow() {
+    if (windows_.size() < 2) {
+        message_ = "Cannot close last window";
+        return;
+    }
+
+    const int id = windows_[activeWin_].id;
+    const std::vector<int> order = layout_.order();
+    std::size_t pos = 0;
+    while (pos < order.size() && order[pos] != id) ++pos;
+    const int target = order[pos > 0 ? pos - 1 : 1];
+
+    layout_.close(id);
+    windows_.erase(windows_.begin() + static_cast<std::ptrdiff_t>(activeWin_));
+    loadWindow(indexOfWindow(target));
+}
+
+void Editor::onlyWindow() {
+    if (windows_.size() < 2) return;
+
+    saveWindow();
+    const Window keep = windows_[activeWin_];
+    layout_.only(keep.id);
+    windows_.clear();
+    windows_.push_back(keep);
+    activeWin_ = 0;
+}
+
+void Editor::handleWindowKey(const Key& key) {
+    takeCount();
+
+    std::optional<Direction> direction;
+    switch (key.type) {
+        case KeyType::Left: direction = Direction::Left; break;
+        case KeyType::Right: direction = Direction::Right; break;
+        case KeyType::Up: direction = Direction::Up; break;
+        case KeyType::Down: direction = Direction::Down; break;
+        case KeyType::Ctrl:
+            if (key.ch == 'w') cycleWindow(true);
+            return;
+        case KeyType::Char: break;
+        default: return;
+    }
+
+    if (!direction) {
+        switch (key.ch) {
+            case 'h': direction = Direction::Left; break;
+            case 'j': direction = Direction::Down; break;
+            case 'k': direction = Direction::Up; break;
+            case 'l': direction = Direction::Right; break;
+            case 'w': cycleWindow(true); return;
+            case 'W':
+            case 'p': cycleWindow(false); return;
+            case 'c':
+            case 'q': closeWindow(); return;
+            case 'o': onlyWindow(); return;
+            case 's': splitWindow(false, ""); return;
+            case 'v': splitWindow(true, ""); return;
+            default: return;
+        }
+    }
+
+    const std::optional<int> target =
+        layout_.neighbor(screenArea(), windows_[activeWin_].id, *direction);
+    if (target) focusWindow(indexOfWindow(*target));
 }
 
 void Editor::enterVisual(char kind) {
@@ -1621,6 +1864,7 @@ void Editor::resetPending() {
     pendingFind_ = 0;
     pendingObject_ = 0;
     pendingReplace_ = false;
+    pendingWindow_ = false;
     pendingG_ = false;
     count_ = 0;
     opCount_ = 0;
@@ -1634,6 +1878,7 @@ std::string Editor::pendingText() const {
     if (pendingObject_ != 0) text += pendingObject_;
     if (pendingFind_ != 0) text += pendingFind_;
     if (pendingReplace_) text += 'r';
+    if (pendingWindow_) text += "^W";
     if (pendingG_) text += 'g';
     return text;
 }
@@ -2067,7 +2312,7 @@ void Editor::scroll() {
     if (row_ < rowOff_) rowOff_ = row_;
     if (row_ >= rowOff_ + rows) rowOff_ = row_ - rows + 1;
 
-    const int width = std::max(1, size_.cols);
+    const int width = std::max(1, activeRect().cols);
     const int column = renderColumn();
     if (column < colOff_) colOff_ = column;
     if (column >= colOff_ + width) colOff_ = column - width + 1;
@@ -2081,7 +2326,7 @@ std::size_t Editor::maxColumn(std::size_t row) const {
 }
 
 std::size_t Editor::textRows() const {
-    return static_cast<std::size_t>(std::max(1, size_.rows - 2));
+    return static_cast<std::size_t>(std::max(1, activeRect().rows - 1));
 }
 
 int Editor::renderColumn() const {
