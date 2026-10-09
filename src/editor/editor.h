@@ -177,6 +177,14 @@ private:
     void put(bool after, int count);
     void putBlock(bool after, int count);
 
+    void putFrom(bool after, int count);
+    void storeNamed();
+    void startRecording(char name);
+    void stopRecording();
+    void playMacro(char name, int count);
+    void showRegisters();
+    bool anyPending() const;
+
     void moveLeft(std::size_t n = 1);
     void moveRight(std::size_t n = 1);
     void moveUp(std::size_t n = 1);
@@ -229,6 +237,19 @@ private:
     int colOff_ = 0;
     FindState lastFind_;
     Register reg_;
+
+    std::map<char, Register> named_;
+    std::map<char, std::vector<Key>> macros_;
+    std::vector<Key> recordKeys_;
+    char recording_ = 0;
+    char lastMacro_ = 0;
+    char selReg_ = 0;
+    char pendingMacro_ = 0;
+    bool pendingRegister_ = false;
+    int macroCount_ = 1;
+    int macroDepth_ = 0;
+    int macroBudget_ = 0;
+
     BlockInsert blockInsert_;
     int count_ = 0;
     int opCount_ = 0;
