@@ -16,6 +16,36 @@ namespace {
 
 constexpr std::size_t kEnd = std::numeric_limits<std::size_t>::max();
 constexpr int kMaxCount = 99999;
+constexpr int kMaxMacroDepth = 50;
+constexpr int kMacroBudget = 200000;
+
+char lowerChar(char c) {
+    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+}
+
+std::string keyLabel(const Key& key) {
+    switch (key.type) {
+        case KeyType::Char: return std::string(1, key.ch);
+        case KeyType::Text: return key.text;
+        case KeyType::Ctrl: return std::string("<C-") + key.ch + ">";
+        default: return "<" + keyName(key) + ">";
+    }
+}
+
+std::string preview(const std::string& text) {
+    std::string flat;
+    for (char c : text) {
+        if (c == '\n') {
+            flat += "^J";
+        } else if (c == '\t') {
+            flat += "^I";
+        } else {
+            flat += c;
+        }
+    }
+    const std::string cut = truncateToWidth(flat, 24);
+    return cut.size() < flat.size() ? cut + "..." : cut;
+}
 
 struct SubstituteSpec {
     std::size_t first = 0;
@@ -254,8 +284,7 @@ bool Editor::canMap() const {
         case Mode::Insert:
             return true;
         case Mode::Normal:
-            return pendingOp_ == 0 && pendingFind_ == 0 && !pendingG_ && !pendingReplace_ &&
-                   !pendingWindow_ && pendingObject_ == 0 && count_ == 0 && opCount_ == 0;
+            return !anyPending() && selReg_ == 0;
         case Mode::Visual:
             return pendingFind_ == 0 && !pendingG_ && count_ == 0;
         case Mode::Command:
@@ -287,6 +316,8 @@ void Editor::resolveMaps(bool timedOut) {
 
 void Editor::dispatch(const Key& key) {
     if (!replaying_) cmdKeys_.push_back(key);
+    if (recording_ != 0 && !replaying_ && macroDepth_ == 0) recordKeys_.push_back(key);
+    const bool hadRegister = selReg_ != 0;
 
     switch (mode_) {
         case Mode::Command:
@@ -307,6 +338,7 @@ void Editor::dispatch(const Key& key) {
             handleNormalKey(key);
             break;
     }
+    if (hadRegister && selReg_ != 0 && !anyPending()) selReg_ = 0;
     if (mode_ != Mode::Insert) history_.close();
     if (!replaying_) trackRepeat();
     scroll();
@@ -319,12 +351,9 @@ void Editor::trackRepeat() {
         return;
     }
     if (mode_ == Mode::Insert) return;
-    if (pendingOp_ != 0 || pendingFind_ != 0 || pendingG_ || pendingReplace_ ||
-        pendingObject_ != 0 || count_ != 0 || opCount_ != 0) {
-        return;
-    }
+    if (anyPending() || selReg_ != 0) return;
 
-    if (changed_ && !tainted_) lastChange_ = cmdKeys_;
+    if (changed_ && !tainted_ && !cmdKeys_.empty()) lastChange_ = cmdKeys_;
     cmdKeys_.clear();
     changed_ = false;
     tainted_ = false;
@@ -362,6 +391,7 @@ ViewState Editor::view() const {
             modeName = visualKind_ == 'V' ? "V-LINE" : visualKind_ == 'B' ? "V-BLOCK" : "VISUAL";
             break;
     }
+    if (recording_ != 0) modeName += std::string(" rec @") + recording_;
 
     v.commandLine = mode_ == Mode::Command || mode_ == Mode::Search;
     if (mode_ == Mode::Command) {
@@ -498,6 +528,34 @@ void Editor::handleNormalKey(const Key& key) {
         return;
     }
 
+    if (pendingRegister_) {
+        pendingRegister_ = false;
+        if (key.type == KeyType::Char && key.ch == '"') {
+            selReg_ = 0;
+        } else if (key.type == KeyType::Char &&
+                   std::isalpha(static_cast<unsigned char>(key.ch)) != 0) {
+            selReg_ = key.ch;
+        } else {
+            resetPending();
+        }
+        return;
+    }
+
+    if (pendingMacro_ != 0) {
+        const char kind = pendingMacro_;
+        pendingMacro_ = 0;
+        if (key.type != KeyType::Char) {
+            resetPending();
+            return;
+        }
+        if (kind == 'q') {
+            startRecording(key.ch);
+        } else {
+            playMacro(key.ch, macroCount_);
+        }
+        return;
+    }
+
     if (pendingObject_ != 0) {
         const bool around = pendingObject_ == 'a';
         pendingObject_ = 0;
@@ -549,6 +607,9 @@ void Editor::handleNormalKey(const Key& key) {
                 pendingOp_ = key.ch;
                 opCount_ = count_;
                 count_ = 0;
+                return;
+            case '"':
+                pendingRegister_ = true;
                 return;
             case 'g':
                 if (!wasPendingG) {
@@ -627,6 +688,17 @@ void Editor::handleNormalKey(const Key& key) {
         case 'p': put(true, n); break;
         case 'P': put(false, n); break;
         case 'u': undo(n); break;
+        case 'q':
+            if (recording_ != 0) {
+                stopRecording();
+            } else {
+                pendingMacro_ = 'q';
+            }
+            break;
+        case '@':
+            pendingMacro_ = '@';
+            macroCount_ = n;
+            break;
         case '.': repeatChange(n); break;
         case 'J': joinLines(n); break;
         case '~': toggleCase(n); break;
@@ -1019,6 +1091,8 @@ void Editor::runCommand(const std::string& text) {
         closeWindow();
     } else if (name == "only" || name == "on") {
         onlyWindow();
+    } else if (name == "reg" || name == "registers" || name == "di" || name == "display") {
+        showRegisters();
     } else if (name == "noh" || name == "nohlsearch") {
         highlight_ = false;
     } else if (name == "syntax") {
@@ -1865,6 +1939,9 @@ void Editor::resetPending() {
     pendingObject_ = 0;
     pendingReplace_ = false;
     pendingWindow_ = false;
+    pendingRegister_ = false;
+    pendingMacro_ = 0;
+    selReg_ = 0;
     pendingG_ = false;
     count_ = 0;
     opCount_ = 0;
@@ -1872,12 +1949,19 @@ void Editor::resetPending() {
 
 std::string Editor::pendingText() const {
     std::string text;
+    if (pendingRegister_) {
+        text += '"';
+    } else if (selReg_ != 0) {
+        text += '"';
+        text += selReg_;
+    }
     if (opCount_ > 0) text += std::to_string(opCount_);
     if (pendingOp_ != 0) text += pendingOp_;
     if (count_ > 0) text += std::to_string(count_);
     if (pendingObject_ != 0) text += pendingObject_;
     if (pendingFind_ != 0) text += pendingFind_;
     if (pendingReplace_) text += 'r';
+    if (pendingMacro_ != 0) text += pendingMacro_;
     if (pendingWindow_) text += "^W";
     if (pendingG_) text += 'g';
     return text;
@@ -1956,6 +2040,7 @@ void Editor::operateRange(char op, const TextRange& range) {
         reg_.text = buffer_->text(range.start, range.end);
         reg_.linewise = false;
     }
+    storeNamed();
 
     if (op == 'y') {
         row_ = range.start.row;
@@ -2095,7 +2180,7 @@ void Editor::replaceChars(const std::string& with, int count) {
     rememberColumn();
 }
 
-void Editor::put(bool after, int count) {
+void Editor::putFrom(bool after, int count) {
     if (reg_.text.empty()) return;
 
     if (reg_.block) {
@@ -2186,6 +2271,140 @@ void Editor::putBlock(bool after, int count) {
     col_ = std::min(at, maxColumn(row_));
     col_ = snapToStart(buffer_->line(row_), col_);
     rememberColumn();
+}
+
+bool Editor::anyPending() const {
+    return pendingOp_ != 0 || pendingFind_ != 0 || pendingObject_ != 0 || pendingReplace_ ||
+           pendingWindow_ || pendingRegister_ || pendingMacro_ != 0 || pendingG_ ||
+           count_ != 0 || opCount_ != 0;
+}
+
+void Editor::put(bool after, int count) {
+    if (selReg_ == 0) {
+        putFrom(after, count);
+        return;
+    }
+
+    const char name = lowerChar(selReg_);
+    selReg_ = 0;
+
+    const auto it = named_.find(name);
+    if (it == named_.end() || it->second.text.empty()) {
+        message_ = std::string("Register ") + name + " is empty";
+        return;
+    }
+
+    const Register saved = reg_;
+    reg_ = it->second;
+    putFrom(after, count);
+    reg_ = saved;
+}
+
+void Editor::storeNamed() {
+    if (selReg_ == 0) return;
+
+    const char name = lowerChar(selReg_);
+    const bool append = std::isupper(static_cast<unsigned char>(selReg_)) != 0;
+    selReg_ = 0;
+
+    const auto it = named_.find(name);
+    if (!append || it == named_.end()) {
+        named_[name] = reg_;
+        return;
+    }
+
+    Register& dest = it->second;
+    const bool lines = dest.linewise || reg_.linewise;
+    if (lines && !dest.text.empty() && dest.text.back() != '\n') dest.text += '\n';
+    dest.text += reg_.text;
+    dest.linewise = lines;
+    dest.block = false;
+    dest.rows.clear();
+}
+
+void Editor::startRecording(char name) {
+    if (std::isalpha(static_cast<unsigned char>(name)) == 0) {
+        message_ = "Invalid register name";
+        return;
+    }
+    recording_ = name;
+    recordKeys_.clear();
+}
+
+void Editor::stopRecording() {
+    if (!recordKeys_.empty()) recordKeys_.pop_back();
+
+    const char name = lowerChar(recording_);
+    const bool append = std::isupper(static_cast<unsigned char>(recording_)) != 0;
+
+    std::vector<Key>& dest = macros_[name];
+    if (append) {
+        dest.insert(dest.end(), recordKeys_.begin(), recordKeys_.end());
+    } else {
+        dest = recordKeys_;
+    }
+
+    recording_ = 0;
+    recordKeys_.clear();
+    message_ = std::string("recorded @") + name;
+}
+
+void Editor::playMacro(char name, int count) {
+    if (name == '@') name = lastMacro_;
+    if (name == 0) {
+        message_ = "No previous macro";
+        return;
+    }
+
+    const char key = lowerChar(name);
+    const auto it = macros_.find(key);
+    if (it == macros_.end() || it->second.empty()) {
+        message_ = std::string("Register @") + key + " is empty";
+        return;
+    }
+    if (macroDepth_ >= kMaxMacroDepth) {
+        message_ = "Macro nested too deeply";
+        return;
+    }
+
+    lastMacro_ = key;
+    const std::vector<Key> keys = it->second;
+
+    if (macroDepth_ == 0) macroBudget_ = kMacroBudget;
+    ++macroDepth_;
+    cmdKeys_.clear();
+    changed_ = false;
+
+    for (int i = 0; i < count && macroBudget_ > 0 && !quit_; ++i) {
+        for (const Key& k : keys) {
+            if (macroBudget_ <= 0 || quit_) break;
+            --macroBudget_;
+            dispatch(k);
+        }
+    }
+
+    --macroDepth_;
+    if (macroBudget_ <= 0) message_ = "Macro stopped: too many keys";
+}
+
+void Editor::showRegisters() {
+    std::string text;
+    auto add = [&](const std::string& label, const std::string& body) {
+        if (!text.empty()) text += "  ";
+        text += label + " " + body;
+    };
+
+    if (!reg_.text.empty()) add("\"\"", preview(reg_.text));
+    for (const auto& [name, content] : named_) {
+        if (!content.text.empty()) add(std::string("\"") + name, preview(content.text));
+    }
+    for (const auto& [name, keys] : macros_) {
+        std::string joined;
+        for (const Key& k : keys) joined += keyLabel(k);
+        if (!joined.empty()) add(std::string("@") + name, preview(joined));
+    }
+
+    message_ = text.empty() ? "No registers" : text;
 }
 
 void Editor::moveLeft(std::size_t n) {
