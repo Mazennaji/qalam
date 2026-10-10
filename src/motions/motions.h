@@ -35,4 +35,6 @@ namespace qalam {
     std::optional<Motion> findChar(const TextBuffer& buffer, Pos from, const std::string& target,
                                    bool forward, bool till, int count);
 
+    std::optional<Motion> matchBracket(const TextBuffer& buffer, Pos from);
+
 }
