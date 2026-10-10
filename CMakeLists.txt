@@ -47,6 +47,8 @@ add_executable(qalam
         src/motions/objects.h
         src/window/layout.cpp
         src/window/layout.h
+        src/search/regex.cpp
+        src/search/regex.h
 )
 
 target_include_directories(qalam PRIVATE src)
