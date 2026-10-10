@@ -61,6 +61,9 @@ private:
         std::size_t wantedCol = 0;
         std::size_t rowOff = 0;
         int colOff = 0;
+        std::map<char, Pos> marks;
+        std::vector<Pos> jumps;
+        std::size_t jumpIdx = 0;
     };
 
     struct Window {
@@ -176,7 +179,6 @@ private:
     void operateRange(char op, const TextRange& range);
     void put(bool after, int count);
     void putBlock(bool after, int count);
-
     void putFrom(bool after, int count);
     void storeNamed();
     void startRecording(char name);
@@ -184,6 +186,15 @@ private:
     void playMacro(char name, int count);
     void showRegisters();
     bool anyPending() const;
+
+    void setMark(char name);
+    std::optional<Pos> markPos(char name) const;
+    void pushJump();
+    void jumpOlder(int count);
+    void jumpNewer(int count);
+    void adjustMarks(Pos start, Pos end, const std::string& text);
+    void searchWord(bool forward, int count);
+    void searchOperate(char op);
 
     void moveLeft(std::size_t n = 1);
     void moveRight(std::size_t n = 1);
@@ -237,19 +248,23 @@ private:
     int colOff_ = 0;
     FindState lastFind_;
     Register reg_;
-
     std::map<char, Register> named_;
     std::map<char, std::vector<Key>> macros_;
     std::vector<Key> recordKeys_;
     char recording_ = 0;
     char lastMacro_ = 0;
     char selReg_ = 0;
+    std::map<char, Pos> marks_;
+    std::vector<Pos> jumps_;
+    std::size_t jumpIdx_ = 0;
+    char pendingMark_ = 0;
+    char searchOp_ = 0;
+    int searchCount_ = 1;
     char pendingMacro_ = 0;
     bool pendingRegister_ = false;
     int macroCount_ = 1;
     int macroDepth_ = 0;
     int macroBudget_ = 0;
-
     BlockInsert blockInsert_;
     int count_ = 0;
     int opCount_ = 0;
