@@ -240,4 +240,52 @@ std::optional<Motion> findChar(const TextBuffer& buffer, Pos from, const std::st
     return Motion{{from.row, i}, false, forward};
 }
 
+std::optional<Motion> matchBracket(const TextBuffer& buffer, Pos from) {
+    static const std::string opens = "([{";
+    static const std::string closes = ")]}";
+
+    const std::string& line = buffer.line(from.row);
+    std::size_t i = from.col;
+    while (i < line.size() && opens.find(line[i]) == std::string::npos &&
+           closes.find(line[i]) == std::string::npos) {
+        ++i;
+    }
+    if (i >= line.size()) return std::nullopt;
+
+    std::size_t k = opens.find(line[i]);
+    const bool forward = k != std::string::npos;
+    if (!forward) k = closes.find(line[i]);
+    const char open = opens[k];
+    const char close = closes[k];
+    int depth = 0;
+
+    if (forward) {
+        for (std::size_t r = from.row; r < buffer.lineCount(); ++r) {
+            const std::string& l = buffer.line(r);
+            for (std::size_t j = r == from.row ? i + 1 : 0; j < l.size(); ++j) {
+                if (l[j] == open) {
+                    ++depth;
+                } else if (l[j] == close) {
+                    if (depth == 0) return Motion{{r, j}, false, true};
+                    --depth;
+                }
+            }
+        }
+    } else {
+        for (std::size_t r = from.row + 1; r-- > 0;) {
+            const std::string& l = buffer.line(r);
+            std::size_t j = r == from.row ? i : l.size();
+            while (j-- > 0) {
+                if (l[j] == close) {
+                    ++depth;
+                } else if (l[j] == open) {
+                    if (depth == 0) return Motion{{r, j}, false, true};
+                    --depth;
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 }
