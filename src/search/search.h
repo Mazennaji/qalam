@@ -8,6 +8,7 @@
 
 #include "buffer/pos.h"
 #include "buffer/text_buffer.h"
+#include "search/regex.h"
 
 namespace qalam {
 
@@ -19,6 +20,11 @@ namespace qalam {
         Pos pos;
         bool wrapped = false;
     };
+
+    bool validatePattern(const std::string& pattern, std::string& error);
+
+    std::vector<Match> matchesInLine(const std::string& line, const std::string& pattern,
+                                     CaseMode mode = CaseMode::Smart);
 
     std::vector<Span> findInLine(const std::string& line, const std::string& pattern,
                                  CaseMode mode = CaseMode::Smart);
