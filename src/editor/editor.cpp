@@ -232,6 +232,9 @@ void Editor::open(const std::string& path) {
     tainted_ = false;
     resetPending();
     history_.clear();
+    marks_.clear();
+    jumps_.clear();
+    jumpIdx_ = 0;
     scroll();
 }
 
@@ -286,7 +289,7 @@ bool Editor::canMap() const {
         case Mode::Normal:
             return !anyPending() && selReg_ == 0;
         case Mode::Visual:
-            return pendingFind_ == 0 && !pendingG_ && count_ == 0;
+            return pendingFind_ == 0 && pendingMark_ == 0 && !pendingG_ && count_ == 0;
         case Mode::Command:
         case Mode::Search:
             return false;
@@ -556,6 +559,42 @@ void Editor::handleNormalKey(const Key& key) {
         return;
     }
 
+    if (pendingMark_ != 0) {
+        const char kind = pendingMark_;
+        pendingMark_ = 0;
+        if (key.type != KeyType::Char) {
+            resetPending();
+            return;
+        }
+        if (kind == 'm') {
+            takeCount();
+            setMark(key.ch);
+            return;
+        }
+
+        const std::optional<Pos> target = markPos(key.ch);
+        if (!target) {
+            message_ = "Mark not set";
+            resetPending();
+            return;
+        }
+
+        const bool lines = kind == '\'';
+        const char op = pendingOp_;
+        takeCount();
+        if (op != 0) {
+            operate(op, Motion{*target, lines, false});
+            return;
+        }
+        pushJump();
+        if (lines) {
+            placeCursor({target->row, firstNonBlank(*buffer_, {target->row, 0}).target.col});
+        } else {
+            placeCursor(*target);
+        }
+        return;
+    }
+
     if (pendingObject_ != 0) {
         const bool around = pendingObject_ == 'a';
         pendingObject_ = 0;
@@ -611,6 +650,11 @@ void Editor::handleNormalKey(const Key& key) {
             case '"':
                 pendingRegister_ = true;
                 return;
+            case 'm':
+            case '`':
+            case '\'':
+                pendingMark_ = key.ch;
+                return;
             case 'g':
                 if (!wasPendingG) {
                     pendingG_ = true;
@@ -636,6 +680,7 @@ void Editor::handleNormalKey(const Key& key) {
         case KeyType::PageUp: pageUp(); return;
         case KeyType::PageDown: pageDown(); return;
         case KeyType::Delete: deleteUnderCursor(n); return;
+        case KeyType::Tab: jumpNewer(n); return;
         case KeyType::Ctrl:
             if (key.ch == 'r') {
                 redo(n);
@@ -643,6 +688,8 @@ void Editor::handleNormalKey(const Key& key) {
                 enterVisual('B');
             } else if (key.ch == 'w') {
                 pendingWindow_ = true;
+            } else if (key.ch == 'o') {
+                jumpOlder(n);
             }
             return;
         case KeyType::Char: break;
@@ -660,16 +707,42 @@ void Editor::handleNormalKey(const Key& key) {
         case 'w': jumpTo(wordForward(*buffer_, here, n)); break;
         case 'b': jumpTo(wordBackward(*buffer_, here, n)); break;
         case 'e': jumpTo(wordEnd(*buffer_, here, n)); break;
-        case '}': jumpTo(paragraphForward(*buffer_, here, n)); break;
-        case '{': jumpTo(paragraphBackward(*buffer_, here, n)); break;
+        case '}':
+            pushJump();
+            jumpTo(paragraphForward(*buffer_, here, n));
+            break;
+        case '{':
+            pushJump();
+            jumpTo(paragraphBackward(*buffer_, here, n));
+            break;
+        case '%':
+            if (const auto m = matchBracket(*buffer_, here)) {
+                pushJump();
+                jumpTo(*m);
+            }
+            break;
+        case '*': searchWord(true, n); break;
+        case '#': searchWord(false, n); break;
         case ';': repeatFind(false, n); break;
         case ',': repeatFind(true, n); break;
         case '/': beginSearch(true); break;
         case '?': beginSearch(false); break;
-        case 'n': findNext(false, n); break;
-        case 'N': findNext(true, n); break;
-        case 'G': moveToLine(counted ? un - 1 : buffer_->lineCount() - 1); break;
-        case 'g': moveToLine(counted ? un - 1 : 0); break;
+        case 'n':
+            pushJump();
+            findNext(false, n);
+            break;
+        case 'N':
+            pushJump();
+            findNext(true, n);
+            break;
+        case 'G':
+            pushJump();
+            moveToLine(counted ? un - 1 : buffer_->lineCount() - 1);
+            break;
+        case 'g':
+            pushJump();
+            moveToLine(counted ? un - 1 : 0);
+            break;
         case 'D': operate('d', lineEnd(*buffer_, here)); break;
         case 'C': operate('c', lineEnd(*buffer_, here)); break;
         case 'Y': operate('y', gotoLine(*buffer_, row_ + un - 1)); break;
@@ -765,6 +838,18 @@ void Editor::handleOperatorKey(const Key& key, bool wasPendingG) {
             case 'a':
                 pendingObject_ = key.ch;
                 return;
+            case '`':
+            case '\'':
+                pendingMark_ = key.ch;
+                return;
+            case '/':
+            case '?': {
+                const int count = takeCount();
+                beginSearch(key.ch == '/');
+                searchOp_ = op;
+                searchCount_ = count;
+                return;
+            }
             default: break;
         }
     }
@@ -780,7 +865,7 @@ void Editor::handleOperatorKey(const Key& key, bool wasPendingG) {
 }
 
 void Editor::handleVisualKey(const Key& key) {
-    if (pendingFind_ != 0) {
+    if (pendingFind_ != 0 || pendingMark_ != 0) {
         handleNormalKey(key);
         return;
     }
@@ -855,6 +940,9 @@ void Editor::handleVisualKey(const Key& key) {
         case 'N':
         case 'G':
         case 'g':
+        case '%':
+        case '`':
+        case '\'':
             handleNormalKey(key);
             return;
         case 'v':
@@ -1186,6 +1274,11 @@ void Editor::stash() {
     doc.wantedCol = wantedCol_;
     doc.rowOff = rowOff_;
     doc.colOff = colOff_;
+    doc.marks = std::move(marks_);
+    doc.jumps = std::move(jumps_);
+    doc.jumpIdx = jumpIdx_;
+    marks_.clear();
+    jumps_.clear();
 }
 
 void Editor::activate(std::size_t index) {
@@ -1198,6 +1291,9 @@ void Editor::activate(std::size_t index) {
     wantedCol_ = doc.wantedCol;
     rowOff_ = doc.rowOff;
     colOff_ = doc.colOff;
+    marks_ = std::move(doc.marks);
+    jumps_ = std::move(doc.jumps);
+    jumpIdx_ = doc.jumpIdx;
     current_ = index;
 
     mode_ = Mode::Normal;
@@ -1265,6 +1361,9 @@ void Editor::closeBuffer(bool force) {
     if (docs_.size() == 1) {
         buffer_ = std::make_unique<LineBuffer>();
         history_.clear();
+        marks_.clear();
+        jumps_.clear();
+        jumpIdx_ = 0;
         path_.clear();
         row_ = 0;
         col_ = 0;
@@ -1720,6 +1819,7 @@ void Editor::previewSearch() {
 
 void Editor::cancelSearch() {
     mode_ = Mode::Normal;
+    searchOp_ = 0;
     searchText_.clear();
     row_ = searchOrigin_.row;
     col_ = searchOrigin_.col;
@@ -1737,6 +1837,15 @@ void Editor::commitSearch() {
 
     lastForward_ = searchForward_;
     if (!pattern.empty()) lastSearch_ = pattern;
+
+    const char op = searchOp_;
+    searchOp_ = 0;
+    if (op != 0) {
+        searchOperate(op);
+        return;
+    }
+
+    pushJump();
     findNext(false, 1);
 }
 
@@ -1880,6 +1989,7 @@ void Editor::openLine(bool below) {
 
 void Editor::applyEdit(Pos start, Pos end, const std::string& text) {
     changed_ = true;
+    adjustMarks(start, end, text);
     syntax_.invalidate(start.row);
     history_.record(buffer_->replace(start, end, text));
 }
@@ -1941,6 +2051,7 @@ void Editor::resetPending() {
     pendingWindow_ = false;
     pendingRegister_ = false;
     pendingMacro_ = 0;
+    pendingMark_ = 0;
     selReg_ = 0;
     pendingG_ = false;
     count_ = 0;
@@ -1962,6 +2073,7 @@ std::string Editor::pendingText() const {
     if (pendingFind_ != 0) text += pendingFind_;
     if (pendingReplace_) text += 'r';
     if (pendingMacro_ != 0) text += pendingMacro_;
+    if (pendingMark_ != 0) text += pendingMark_;
     if (pendingWindow_) text += "^W";
     if (pendingG_) text += 'g';
     return text;
@@ -1999,6 +2111,7 @@ std::optional<Motion> Editor::operatorMotion(const Key& key, bool wasPendingG, i
         case 'e': return wordEnd(*buffer_, here, count);
         case '}': return paragraphForward(*buffer_, here, count);
         case '{': return paragraphBackward(*buffer_, here, count);
+        case '%': return matchBracket(*buffer_, here);
         case 'G': return gotoLine(*buffer_, counted ? line : buffer_->lineCount() - 1);
         case 'g':
             if (wasPendingG) return gotoLine(*buffer_, counted ? line : 0);
@@ -2275,8 +2388,8 @@ void Editor::putBlock(bool after, int count) {
 
 bool Editor::anyPending() const {
     return pendingOp_ != 0 || pendingFind_ != 0 || pendingObject_ != 0 || pendingReplace_ ||
-           pendingWindow_ || pendingRegister_ || pendingMacro_ != 0 || pendingG_ ||
-           count_ != 0 || opCount_ != 0;
+           pendingWindow_ || pendingRegister_ || pendingMacro_ != 0 || pendingMark_ != 0 ||
+           pendingG_ || count_ != 0 || opCount_ != 0;
 }
 
 void Editor::put(bool after, int count) {
@@ -2405,6 +2518,137 @@ void Editor::showRegisters() {
     }
 
     message_ = text.empty() ? "No registers" : text;
+}
+
+void Editor::setMark(char name) {
+    if (std::isalpha(static_cast<unsigned char>(name)) == 0) {
+        message_ = "Invalid mark name";
+        return;
+    }
+    marks_[name] = {row_, col_};
+}
+
+std::optional<Pos> Editor::markPos(char name) const {
+    if (name == '`') name = '\'';
+    const auto it = marks_.find(name);
+    if (it == marks_.end()) return std::nullopt;
+
+    Pos p = it->second;
+    p.row = std::min(p.row, buffer_->lineCount() - 1);
+    const std::string& line = buffer_->line(p.row);
+    p.col = snapToStart(line, std::min(p.col, line.size()));
+    return p;
+}
+
+void Editor::pushJump() {
+    const Pos here{row_, col_};
+    marks_['\''] = here;
+    jumps_.erase(std::remove_if(jumps_.begin(), jumps_.end(),
+                                [&](const Pos& p) { return p.row == here.row; }),
+                 jumps_.end());
+    jumps_.push_back(here);
+    if (jumps_.size() > 100) jumps_.erase(jumps_.begin());
+    jumpIdx_ = jumps_.size();
+}
+
+void Editor::jumpOlder(int count) {
+    if (jumps_.empty()) {
+        message_ = "Jump list is empty";
+        return;
+    }
+    if (jumpIdx_ >= jumps_.size()) {
+        pushJump();
+        jumpIdx_ = jumps_.size() - 1;
+    }
+    if (jumpIdx_ == 0) {
+        message_ = "Already at oldest jump";
+        return;
+    }
+    const auto n = static_cast<std::size_t>(count);
+    jumpIdx_ = jumpIdx_ > n ? jumpIdx_ - n : 0;
+    placeCursor(jumps_[jumpIdx_]);
+}
+
+void Editor::jumpNewer(int count) {
+    if (jumpIdx_ + 1 >= jumps_.size()) {
+        message_ = "Already at newest jump";
+        return;
+    }
+    const auto n = static_cast<std::size_t>(count);
+    jumpIdx_ = std::min(jumpIdx_ + n, jumps_.size() - 1);
+    placeCursor(jumps_[jumpIdx_]);
+}
+
+void Editor::adjustMarks(Pos start, Pos end, const std::string& text) {
+    if (marks_.empty() && jumps_.empty()) return;
+
+    const Pos newEnd = endOf(start, text);
+    auto fix = [&](Pos& p) {
+        if (p < start) return;
+        if (p < end) {
+            p = start;
+            return;
+        }
+        if (p.row == end.row) {
+            p = {newEnd.row, newEnd.col + (p.col - end.col)};
+        } else {
+            p.row = p.row - (end.row - start.row) + (newEnd.row - start.row);
+        }
+    };
+
+    for (auto& entry : marks_) fix(entry.second);
+    for (Pos& p : jumps_) fix(p);
+}
+
+void Editor::searchWord(bool forward, int count) {
+    const std::string& line = buffer_->line(row_);
+    auto isWord = [&](std::size_t i) {
+        const auto u = static_cast<unsigned char>(line[i]);
+        return std::isalnum(u) != 0 || u == '_' || u >= 128;
+    };
+
+    std::size_t i = col_;
+    while (i < line.size() && !isWord(i)) ++i;
+    if (i >= line.size()) {
+        message_ = "No word under cursor";
+        return;
+    }
+
+    std::size_t start = i;
+    while (start > 0 && isWord(start - 1)) --start;
+    std::size_t stop = i;
+    while (stop < line.size() && isWord(stop)) ++stop;
+
+    lastSearch_ = line.substr(start, stop - start);
+    lastForward_ = forward;
+    highlight_ = true;
+
+    pushJump();
+    col_ = start;
+    rememberColumn();
+    findNext(false, count);
+}
+
+void Editor::searchOperate(char op) {
+    if (lastSearch_.empty()) {
+        message_ = "No previous search pattern";
+        return;
+    }
+
+    Pos pos{row_, col_};
+    for (int i = 0; i < searchCount_; ++i) {
+        const std::optional<SearchHit> hit = lastForward_
+                                                 ? searchForward(*buffer_, pos, lastSearch_)
+                                                 : searchBackward(*buffer_, pos, lastSearch_);
+        if (!hit) {
+            message_ = "Pattern not found: " + lastSearch_;
+            return;
+        }
+        pos = hit->pos;
+    }
+
+    highlight_ = true;
+    operate(op, Motion{pos, false, false});
 }
 
 void Editor::moveLeft(std::size_t n) {
