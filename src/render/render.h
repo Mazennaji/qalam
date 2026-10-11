@@ -31,6 +31,9 @@ namespace qalam {
         std::string fileName;
         bool modified = false;
         bool showWelcome = false;
+        bool number = false;
+        bool relative = false;
+        bool wrap = false;
         std::optional<Selection> selection;
         std::size_t rowOffset = 0;
         int colOffset = 0;
@@ -49,5 +52,6 @@ namespace qalam {
     };
 
     std::string renderFrame(Size size, const ViewState& view);
+    int gutterWidth(bool show, std::size_t lineCount, int cols);
 
 }
