@@ -4,6 +4,7 @@
 #include <cctype>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <utility>
 
 #include "buffer/file_io.h"
@@ -70,6 +71,43 @@ namespace qalam {
 
         std::string describe(const std::string &path, std::size_t lines, std::size_t bytes) {
             return "\"" + path + "\" " + std::to_string(lines) + "L, " + std::to_string(bytes) + "B";
+        }
+
+        struct ViewPlace {
+            std::size_t rowOff = 0;
+            int colOff = 0;
+            int cursorRow = 0;
+            int cursorCol = 0;
+        };
+
+        ViewPlace placeInView(const TextBuffer &text, std::size_t row, std::size_t col,
+                              std::size_t rowOff, int colOff, int rows, int width, bool wrap) {
+            const std::string &line = text.line(row);
+            const int column = displayColumn(line, col);
+            if (rowOff > row) rowOff = row;
+
+            if (wrap) {
+                const int segment = column / width;
+                int used = segment + 1;
+                std::size_t top = row;
+                while (top > 0) {
+                    const int h = wrapHeight(text.line(top - 1), width);
+                    if (used + h > rows) break;
+                    used += h;
+                    --top;
+                }
+                if (rowOff < top) rowOff = top;
+
+                int above = 0;
+                for (std::size_t r = rowOff; r < row; ++r) above += wrapHeight(text.line(r), width);
+                return {rowOff, 0, above + segment, column % width};
+            }
+
+            const auto height = static_cast<std::size_t>(rows);
+            if (row >= rowOff + height) rowOff = row - height + 1;
+            if (column < colOff) colOff = column;
+            if (column >= colOff + width) colOff = column - width + 1;
+            return {rowOff, colOff, static_cast<int>(row - rowOff), column - colOff};
         }
 
         std::optional<MapMode> mapModeFor(Mode mode) {
@@ -248,6 +286,9 @@ namespace qalam {
         syntax_.resetColors();
         for (const auto &[name, code]: config.colors) syntax_.setColor(name, code);
         syntax_.setEnabled(config.syntax);
+        number_ = config.number;
+        relative_ = config.relativeNumber;
+        wrap_ = config.wrap;
         timeoutTicks_ = std::max(1, (config.timeoutMs + 99) / 100);
         mapPending_.clear();
         mapTicks_ = 0;
@@ -434,6 +475,11 @@ namespace qalam {
             WindowView w;
             w.rect = p.rect;
             w.active = index == activeWin_;
+            w.number = number_;
+            w.relative = relative_;
+            w.wrap = wrap_;
+            const int rows = std::max(1, p.rect.rows - 1);
+            const bool numbers = number_ || relative_;
 
             if (w.active) {
                 w.buffer = buffer_.get();
@@ -456,12 +502,16 @@ namespace qalam {
                 }
                 w.showWelcome =
                         path_.empty() && buffer_->lineCount() == 1 && buffer_->line(0).empty();
-                w.rowOffset = rowOff_;
-                w.colOffset = colOff_;
+
+                const int g = gutterWidth(numbers, buffer_->lineCount(), p.rect.cols);
+                const ViewPlace s = placeInView(*buffer_, row_, col_, rowOff_, colOff_, rows,
+                                                std::max(1, p.rect.cols - g), wrap_);
+                w.rowOffset = s.rowOff;
+                w.colOffset = s.colOff;
                 w.line = row_;
                 w.col = static_cast<std::size_t>(renderColumn());
-                w.cursorRow = static_cast<int>(row_ - rowOff_);
-                w.cursorCol = renderColumn() - colOff_;
+                w.cursorRow = s.cursorRow;
+                w.cursorCol = s.cursorCol + g;
             } else {
                 const Window &win = windows_[index];
                 const std::size_t doc = std::min(win.doc, docs_.size() - 1);
@@ -475,23 +525,16 @@ namespace qalam {
                 const std::string &line = text.line(r);
                 const std::size_t limit = line.empty() ? 0 : prevCharStart(line, line.size());
                 const std::size_t c = snapToStart(line, std::min(win.col, limit));
-                const int column = displayColumn(line, c);
 
-                const auto rows = static_cast<std::size_t>(std::max(1, p.rect.rows - 1));
-                const int width = std::max(1, p.rect.cols);
-                std::size_t rowOffset = win.rowOff;
-                if (r < rowOffset) rowOffset = r;
-                if (r >= rowOffset + rows) rowOffset = r - rows + 1;
-                int colOffset = win.colOff;
-                if (column < colOffset) colOffset = column;
-                if (column >= colOffset + width) colOffset = column - width + 1;
-
-                w.rowOffset = rowOffset;
-                w.colOffset = colOffset;
+                const int g = gutterWidth(numbers, text.lineCount(), p.rect.cols);
+                const ViewPlace s = placeInView(text, r, c, win.rowOff, win.colOff, rows,
+                                                std::max(1, p.rect.cols - g), wrap_);
+                w.rowOffset = s.rowOff;
+                w.colOffset = s.colOff;
                 w.line = r;
-                w.col = static_cast<std::size_t>(column);
-                w.cursorRow = static_cast<int>(r - rowOffset);
-                w.cursorCol = column - colOffset;
+                w.col = static_cast<std::size_t>(displayColumn(line, c));
+                w.cursorRow = s.cursorRow;
+                w.cursorCol = s.cursorCol + g;
             }
             v.windows.push_back(std::move(w));
         }
@@ -1248,6 +1291,19 @@ namespace qalam {
             onlyWindow();
         } else if (name == "reg" || name == "registers" || name == "di" || name == "display") {
             showRegisters();
+        } else if (name == "set" || name == "se") {
+            if (argument.empty()) {
+                message_ = optionSummary();
+            } else {
+                std::istringstream words(argument);
+                std::string word;
+                while (words >> word) {
+                    if (!setOption(word)) {
+                        message_ = "Unknown option: " + word;
+                        break;
+                    }
+                }
+            }
         } else if (name == "noh" || name == "nohlsearch") {
             highlight_ = false;
         } else if (name == "syntax") {
@@ -2868,14 +2924,60 @@ namespace qalam {
     }
 
     void Editor::scroll() {
-        const std::size_t rows = textRows();
-        if (row_ < rowOff_) rowOff_ = row_;
-        if (row_ >= rowOff_ + rows) rowOff_ = row_ - rows + 1;
+        const ViewPlace s = placeInView(*buffer_, row_, col_, rowOff_, colOff_,
+                                        static_cast<int>(textRows()), textWidth(), wrap_);
+        rowOff_ = s.rowOff;
+        colOff_ = s.colOff;
+    }
 
-        const int width = std::max(1, activeRect().cols);
-        const int column = renderColumn();
-        if (column < colOff_) colOff_ = column;
-        if (column >= colOff_ + width) colOff_ = column - width + 1;
+    int Editor::gutter() const {
+        return gutterWidth(number_ || relative_, buffer_->lineCount(), activeRect().cols);
+    }
+
+    int Editor::textWidth() const {
+        return std::max(1, activeRect().cols - gutter());
+    }
+
+    bool Editor::setOption(const std::string &raw) {
+        std::string name = raw;
+        bool toggle = false;
+        bool value = true;
+
+        if (!name.empty() && name.back() == '!') {
+            toggle = true;
+            name.pop_back();
+        }
+        if (!toggle && name.size() > 2 && name.compare(0, 2, "no") == 0) {
+            value = false;
+            name = name.substr(2);
+        }
+
+        bool *target = nullptr;
+        if (name == "number" || name == "nu") {
+            target = &number_;
+        } else if (name == "relativenumber" || name == "rnu") {
+            target = &relative_;
+        } else if (name == "wrap") {
+            target = &wrap_;
+        } else if (name == "syntax") {
+            bool current = syntax_.enabled();
+            syntax_.setEnabled(toggle ? !current : value);
+            return true;
+        } else {
+            return false;
+        }
+
+        *target = toggle ? !*target : value;
+        return true;
+    }
+
+    std::string Editor::optionSummary() const {
+        std::string text;
+        text += number_ ? "number" : "nonumber";
+        text += relative_ ? " relativenumber" : " norelativenumber";
+        text += wrap_ ? " wrap" : " nowrap";
+        text += syntax_.enabled() ? " syntax" : " nosyntax";
+        return text;
     }
 
     std::size_t Editor::maxColumn(std::size_t row) const {
