@@ -22,6 +22,9 @@ namespace qalam {
         std::vector<std::string> errors;
         int timeoutMs = 500;
         bool syntax = true;
+        bool number = false;
+        bool relativeNumber = false;
+        bool wrap = false;
         bool found = false;
     };
 
