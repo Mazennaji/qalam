@@ -281,6 +281,20 @@ namespace qalam {
 
         void searchOperate(char op);
 
+        bool runRangeCommand(const std::string &name, const std::string &argument,
+                             std::size_t first, std::size_t last);
+
+        void globalCommand(std::size_t first, std::size_t last, std::string pattern, bool invert,
+                           const std::string &command);
+
+        void runNormal(std::size_t first, std::size_t last, const std::string &text);
+
+        void deleteLineRange(std::size_t first, std::size_t last);
+
+        void insertLinesAfter(std::size_t dest, const std::string &block);
+
+        void adjustTracked(Pos start, Pos end, const std::string &text);
+
         void moveLeft(std::size_t n = 1);
 
         void moveRight(std::size_t n = 1);
@@ -394,6 +408,9 @@ namespace qalam {
         bool highlight_ = false;
         bool pendingG_ = false;
         bool quit_ = false;
+
+        std::vector<std::size_t> tracked_;
+        int batch_ = 0;
 
         bool number_ = false;
         bool relative_ = false;
