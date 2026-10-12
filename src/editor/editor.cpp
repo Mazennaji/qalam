@@ -9,6 +9,7 @@
 
 #include "buffer/file_io.h"
 #include "buffer/line_buffer.h"
+#include "input/key_notation.h"
 #include "search/substitute.h"
 #include "text/columns.h"
 
@@ -381,7 +382,7 @@ namespace qalam {
                 break;
         }
         if (hadRegister && selReg_ != 0 && !anyPending()) selReg_ = 0;
-        if (mode_ != Mode::Insert) history_.close();
+        if (mode_ != Mode::Insert && batch_ == 0) history_.close();
         if (!replaying_) trackRepeat();
         scroll();
     }
@@ -405,11 +406,12 @@ namespace qalam {
         if (lastChange_.empty()) return;
 
         const std::vector<Key> keys = lastChange_;
+        const bool before = replaying_;
         replaying_ = true;
         for (int i = 0; i < count; ++i) {
             for (const Key &key: keys) dispatch(key);
         }
-        replaying_ = false;
+        replaying_ = before;
 
         cmdKeys_.clear();
         changed_ = false;
@@ -1219,9 +1221,79 @@ namespace qalam {
                 break;
         }
 
-        const auto split = line.find_first_of(" \t");
-        std::string name = line.substr(0, split);
-        const std::string argument = split == std::string::npos ? "" : trim(line.substr(split));
+        std::size_t at = 0;
+        std::size_t first = row_;
+        std::size_t last = row_;
+        bool ranged = false;
+        const std::size_t total = buffer_->lineCount();
+
+        if (line[0] == '%') {
+            first = 0;
+            last = total - 1;
+            at = 1;
+            ranged = true;
+        } else if (const auto a = parseAddress(line, at, row_, total)) {
+            first = *a;
+            last = *a;
+            ranged = true;
+            if (at < line.size() && line[at] == ',') {
+                ++at;
+                const auto b = parseAddress(line, at, row_, total);
+                if (!b) {
+                    message_ = "Invalid range";
+                    return;
+                }
+                last = *b;
+            }
+        }
+        if (first > last) std::swap(first, last);
+
+        const std::string rest = trim(line.substr(at));
+        if (rest.empty()) {
+            if (ranged) {
+                pushJump();
+                placeCursor({last, firstNonBlank(*buffer_, {last, 0}).target.col});
+            }
+            return;
+        }
+
+        if ((rest[0] == 'g' || rest[0] == 'v') && rest.size() > 1) {
+            const bool bang = rest[0] == 'g' && rest[1] == '!';
+            const std::size_t d = bang ? 2 : 1;
+            if (d < rest.size() && std::isalnum(static_cast<unsigned char>(rest[d])) == 0 &&
+                rest[d] != ' ' && rest[d] != '\\') {
+                const char delim = rest[d];
+                std::string pattern;
+                std::size_t i = d + 1;
+                while (i < rest.size() && rest[i] != delim) {
+                    if (rest[i] == '\\' && i + 1 < rest.size() && rest[i + 1] == delim) {
+                        pattern += delim;
+                        i += 2;
+                    } else {
+                        pattern += rest[i++];
+                    }
+                }
+                if (i < rest.size()) ++i;
+                const std::string command = trim(rest.substr(i));
+                if (!ranged) {
+                    first = 0;
+                    last = total - 1;
+                }
+                globalCommand(first, last, pattern, rest[0] == 'v' || bang, command);
+                return;
+            }
+        }
+
+        const auto split = rest.find_first_of(" \t");
+        std::string name = rest.substr(0, split);
+        std::string argument = split == std::string::npos ? "" : trim(rest.substr(split));
+
+        if (name.size() > 1 && (name[0] == 'm' || name[0] == 't') &&
+            (std::isdigit(static_cast<unsigned char>(name[1])) != 0 || name[1] == '$' ||
+             name[1] == '.')) {
+            argument = name.substr(1);
+            name = name.substr(0, 1);
+        }
 
         bool force = false;
         if (name.size() > 1 && name.back() == '!') {
@@ -1232,6 +1304,8 @@ namespace qalam {
         if (const auto alias = aliases_.find(name); alias != aliases_.end()) {
             name = alias->second;
         }
+
+        if (runRangeCommand(name, argument, first, last)) return;
 
         if (name == "w" || name == "write") {
             save(argument);
@@ -2143,6 +2217,7 @@ namespace qalam {
     void Editor::applyEdit(Pos start, Pos end, const std::string &text) {
         changed_ = true;
         adjustMarks(start, end, text);
+        adjustTracked(start, end, text);
         syntax_.invalidate(start.row);
         history_.record(buffer_->replace(start, end, text));
     }
@@ -2802,6 +2877,242 @@ namespace qalam {
 
         highlight_ = true;
         operate(op, Motion{pos, false, false});
+    }
+
+    void Editor::adjustTracked(Pos start, Pos end, const std::string &text) {
+        if (tracked_.empty()) return;
+
+        const std::size_t removed = end.row - start.row;
+        const std::size_t added = endOf(start, text).row - start.row;
+        const bool wholeLines = removed > 0 && start.col == 0 && end.col == 0 && text.empty();
+        const bool pushDown = removed == 0 && start.col == 0 && !text.empty() && text.back() == '\n';
+
+        for (std::size_t &r: tracked_) {
+            if (r == kEnd) continue;
+            if (wholeLines) {
+                if (r >= end.row) {
+                    r -= removed;
+                } else if (r >= start.row) {
+                    r = kEnd;
+                }
+            } else if (pushDown) {
+                if (r >= start.row) r += added;
+            } else if (r > end.row) {
+                r = r - removed + added;
+            } else if (r > start.row) {
+                r = kEnd;
+            }
+        }
+    }
+
+    void Editor::deleteLineRange(std::size_t first, std::size_t last) {
+        if (last + 1 < buffer_->lineCount()) {
+            applyEdit({first, 0}, {last + 1, 0}, "");
+        } else if (first > 0) {
+            applyEdit({first - 1, buffer_->line(first - 1).size()},
+                      {last, buffer_->line(last).size()}, "");
+        } else {
+            applyEdit({0, 0}, {last, buffer_->line(last).size()}, "");
+        }
+    }
+
+    void Editor::insertLinesAfter(std::size_t dest, const std::string &block) {
+        if (dest == 0) {
+            applyEdit({0, 0}, {0, 0}, block + "\n");
+        } else {
+            const std::size_t length = buffer_->line(dest - 1).size();
+            applyEdit({dest - 1, length}, {dest - 1, length}, "\n" + block);
+        }
+    }
+
+    void Editor::runNormal(std::size_t first, std::size_t last, const std::string &text) {
+        std::string error;
+        const std::optional<std::vector<Key> > keys = parseKeys(text, error);
+        if (!keys) {
+            message_ = "Invalid keys: " + error;
+            return;
+        }
+        if (keys->empty()) return;
+
+        auto runAt = [&](std::size_t r) {
+            if (r >= buffer_->lineCount()) return;
+            row_ = r;
+            col_ = 0;
+            mode_ = Mode::Normal;
+            resetPending();
+            rememberColumn();
+
+            const bool before = replaying_;
+            replaying_ = true;
+            for (const Key &key: *keys) dispatch(key);
+            replaying_ = before;
+
+            if (mode_ == Mode::Insert) {
+                leaveInsert();
+            } else {
+                mode_ = Mode::Normal;
+                commandText_.clear();
+                searchText_.clear();
+                searchOp_ = 0;
+            }
+            resetPending();
+        };
+
+        const bool own = tracked_.empty() && first < last;
+        if (own) {
+            for (std::size_t r = first; r <= last; ++r) tracked_.push_back(r);
+            ++batch_;
+            for (std::size_t i = 0; i < tracked_.size() && !quit_; ++i) {
+                if (tracked_[i] != kEnd) runAt(tracked_[i]);
+            }
+            --batch_;
+            tracked_.clear();
+        } else {
+            for (std::size_t r = first; r <= last && !quit_; ++r) runAt(r);
+        }
+        placeCursor({row_, col_});
+    }
+
+    void Editor::globalCommand(std::size_t first, std::size_t last, std::string pattern,
+                               bool invert, const std::string &command) {
+        if (batch_ > 0) {
+            message_ = "Cannot use :g inside :g";
+            return;
+        }
+        if (pattern.empty()) pattern = lastSearch_;
+        if (pattern.empty()) {
+            message_ = "No previous search pattern";
+            return;
+        }
+
+        std::string patternError;
+        if (!validatePattern(pattern, patternError)) {
+            message_ = "Invalid pattern: " + patternError;
+            return;
+        }
+
+        last = std::min(last, buffer_->lineCount() - 1);
+        first = std::min(first, last);
+
+        std::vector<std::size_t> rows;
+        for (std::size_t r = first; r <= last; ++r) {
+            const bool hit = !findInLine(buffer_->line(r), pattern).empty();
+            if (hit != invert) rows.push_back(r);
+        }
+
+        lastSearch_ = pattern;
+        highlight_ = true;
+
+        if (rows.empty()) {
+            message_ = (invert ? "No lines without pattern: " : "Pattern not found: ") + pattern;
+            return;
+        }
+        if (command.empty()) {
+            message_ = std::to_string(rows.size()) + (rows.size() == 1
+                                                          ? " matching line"
+                                                          : " matching lines");
+            return;
+        }
+
+        tracked_ = rows;
+        ++batch_;
+        std::size_t ran = 0;
+        for (std::size_t i = 0; i < tracked_.size() && !quit_; ++i) {
+            const std::size_t r = tracked_[i];
+            if (r == kEnd || r >= buffer_->lineCount()) continue;
+            row_ = r;
+            col_ = 0;
+            mode_ = Mode::Normal;
+            rememberColumn();
+            runCommand(command);
+            ++ran;
+        }
+        --batch_;
+        tracked_.clear();
+        placeCursor({row_, col_});
+
+        if (message_.rfind("Not an editor command", 0) != 0) {
+            message_ = std::to_string(ran) + (ran == 1 ? " line" : " lines") + " processed";
+        }
+    }
+
+    bool Editor::runRangeCommand(const std::string &name, const std::string &argument,
+                                 std::size_t first, std::size_t last) {
+        const bool del = name == "d" || name == "delete";
+        const bool yank = name == "y" || name == "yank";
+        const bool move = name == "m" || name == "move";
+        const bool copy = name == "t" || name == "co" || name == "copy";
+        const bool right = name == ">";
+        const bool left = name == "<";
+        const bool normal = name == "normal" || name == "norm";
+        if (!del && !yank && !move && !copy && !right && !left && !normal) return false;
+
+        last = std::min(last, buffer_->lineCount() - 1);
+        first = std::min(first, last);
+
+        if (del) {
+            operateRange('d', TextRange{{first, 0}, {last, 0}, true});
+            return true;
+        }
+        if (yank) {
+            const Pos keep{row_, col_};
+            operateRange('y', TextRange{{first, 0}, {last, 0}, true});
+            placeCursor(keep);
+            return true;
+        }
+        if (right || left) {
+            shiftLines(right, first, last);
+            return true;
+        }
+        if (normal) {
+            runNormal(first, last, argument);
+            return true;
+        }
+
+        std::optional<std::size_t> dest;
+        if (argument == ".") {
+            dest = row_ + 1;
+        } else if (argument == "$") {
+            dest = buffer_->lineCount();
+        } else if (!argument.empty() && argument.size() <= 6 &&
+                   std::all_of(argument.begin(), argument.end(), [](char c) {
+                       return std::isdigit(static_cast<unsigned char>(c)) != 0;
+                   })) {
+            dest = std::min<std::size_t>(std::stoul(argument), buffer_->lineCount());
+        }
+        if (!dest) {
+            message_ = "Invalid address";
+            return true;
+        }
+
+        const std::size_t d = *dest;
+        const std::size_t count = last - first + 1;
+        const std::string block = buffer_->text({first, 0}, {last, buffer_->line(last).size()});
+        std::size_t newLast = 0;
+
+        if (copy) {
+            insertLinesAfter(d, block);
+            newLast = d + count - 1;
+        } else {
+            const std::size_t f = first + 1;
+            const std::size_t l = last + 1;
+            if (d + 1 >= f && d <= l) {
+                if (d >= f && d < l) message_ = "Cannot move a range of lines into itself";
+                return true;
+            }
+            if (d > l) {
+                insertLinesAfter(d, block);
+                deleteLineRange(first, last);
+                newLast = d - 1;
+            } else {
+                deleteLineRange(first, last);
+                insertLinesAfter(d, block);
+                newLast = d + count - 1;
+            }
+        }
+
+        placeCursor({newLast, firstNonBlank(*buffer_, {newLast, 0}).target.col});
+        return true;
     }
 
     void Editor::moveLeft(std::size_t n) {
