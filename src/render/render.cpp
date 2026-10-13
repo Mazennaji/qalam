@@ -283,7 +283,8 @@ namespace qalam {
 
         if (view.commandLine) {
             cursorRow = size.rows;
-            cursorCol = std::min(displayWidth(msg) + 1, std::max(size.cols, 1));
+            const int wanted = view.promptCursor >= 0 ? view.promptCursor + 1 : displayWidth(msg) + 1;
+            cursorCol = std::min(wanted, std::max(size.cols, 1));
         }
 
         out += moveTo(cursorRow, cursorCol);
