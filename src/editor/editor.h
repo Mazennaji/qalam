@@ -295,6 +295,20 @@ namespace qalam {
 
         void adjustTracked(Pos start, Pos end, const std::string &text);
 
+        bool promptKey(const Key &key);
+
+        std::string &promptText();
+
+        void resetPrompt(std::size_t pos);
+
+        void insertPrompt(const std::string &text);
+
+        void historyStep(bool older);
+
+        void completeCommand();
+
+        void readFile(const std::string &path, std::size_t after);
+
         void moveLeft(std::size_t n = 1);
 
         void moveRight(std::size_t n = 1);
@@ -411,6 +425,19 @@ namespace qalam {
 
         std::vector<std::size_t> tracked_;
         int batch_ = 0;
+
+        std::vector<std::string> cmdHist_;
+        std::vector<std::string> searchHist_;
+        std::vector<std::string> complCands_;
+        std::string histDraft_;
+        std::string complBase_;
+        std::string complTail_;
+        std::size_t promptPos_ = 0;
+        std::size_t histIdx_ = static_cast<std::size_t>(-1);
+        std::size_t complStart_ = 0;
+        std::size_t complIdx_ = 0;
+        bool complActive_ = false;
+        bool promptReg_ = false;
 
         bool number_ = false;
         bool relative_ = false;
