@@ -21,6 +21,7 @@ namespace qalam {
     public:
         void add(MapMode mode, std::vector<Key> lhs, std::vector<Key> rhs);
         MapLookup find(MapMode mode, const std::vector<Key>& typed) const;
+        bool remove(MapMode mode, const std::vector<Key>& lhs);
 
     private:
         struct Entry {
