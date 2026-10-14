@@ -2,20 +2,10 @@
 
 #include <algorithm>
 
-namespace {
-    int gTabStop = 4;
-}
-
-int tabStop() {
-    return gTabStop;
-}
-
-void setTabStop(int width) {
-    gTabStop = std::max(1, std::min(width, 32));
-}
-
 namespace qalam {
     namespace {
+        int gTabStop = 4;
+
         struct Interval {
             char32_t first;
             char32_t last;
@@ -63,7 +53,7 @@ namespace qalam {
         std::size_t cellWidth(const std::string &line, std::size_t index, std::size_t length,
                               std::size_t column) {
             if (line[index] == '\t') {
-                const auto stop = static_cast<std::size_t>(kTabStop);
+                const auto stop = static_cast<std::size_t>(gTabStop);
                 return stop - column % stop;
             }
             if (length == 1) return 1;
@@ -73,6 +63,14 @@ namespace qalam {
             if (contains(kWide, cp)) return 2;
             return 1;
         }
+    }
+
+    int tabStop() {
+        return gTabStop;
+    }
+
+    void setTabStop(int width) {
+        gTabStop = std::max(1, std::min(width, 32));
     }
 
     std::size_t charLength(const std::string &line, std::size_t index) {
@@ -195,7 +193,7 @@ namespace qalam {
             const auto lead = static_cast<unsigned char>(line[i]);
 
             if (lead == '\t') {
-                const auto stop = static_cast<std::size_t>(kTabStop);
+                const auto stop = static_cast<std::size_t>(gTabStop);
                 cells.insert(cells.end(), stop - cells.size() % stop, " ");
             } else if (length == 1 && (lead < 0x20 || lead >= 0x7F)) {
                 cells.emplace_back("?");
@@ -225,7 +223,7 @@ namespace qalam {
             const auto lead = static_cast<unsigned char>(line[i]);
 
             if (lead == '\t') {
-                const auto stop = static_cast<std::size_t>(kTabStop);
+                const auto stop = static_cast<std::size_t>(gTabStop);
                 sources.insert(sources.end(), stop - sources.size() % stop, i);
             } else if (length == 1 && (lead < 0x20 || lead >= 0x7F)) {
                 sources.push_back(i);
