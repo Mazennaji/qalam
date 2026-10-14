@@ -49,6 +49,8 @@ add_executable(qalam
         src/window/layout.h
         src/search/regex.cpp
         src/search/regex.h
+        src/clipboard/clipboard.cpp
+        src/clipboard/clipboard.h
 )
 
 target_include_directories(qalam PRIVATE src)
