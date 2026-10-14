@@ -27,6 +27,18 @@ namespace qalam {
             return std::nullopt;
         }
 
+        bool parseSmall(const std::string &value, int low, int high, int &out) {
+            const bool digits = !value.empty() && value.size() <= 3 &&
+                                std::all_of(value.begin(), value.end(), [](char c) {
+                                    return std::isdigit(static_cast<unsigned char>(c)) != 0;
+                                });
+            if (!digits) return false;
+            const int n = std::stoi(value);
+            if (n < low || n > high) return false;
+            out = n;
+            return true;
+        }
+
         bool parseMapLine(const std::vector<std::string> &words, Config &config, std::string &error) {
             if (words.size() != 4) {
                 error = "usage: map MODE KEYS KEYS (write spaces as <Space>)";
@@ -113,6 +125,12 @@ namespace qalam {
                     config.relativeNumber = value;
                 } else if (name == "wrap") {
                     config.wrap = value;
+                } else if (name == "expandtab" || name == "et") {
+                    config.expandtab = value;
+                } else if (name == "autoindent" || name == "ai") {
+                    config.autoindent = value;
+                } else if (name == "history") {
+                    config.history = value;
                 } else if (name == "syntax") {
                     config.syntax = value;
                 } else {
@@ -134,6 +152,22 @@ namespace qalam {
                     config.syntax = false;
                 } else {
                     error = "syntax must be on or off";
+                    return false;
+                }
+                return true;
+            }
+
+            if (words[1] == "tabstop" || words[1] == "ts") {
+                if (!parseSmall(words[2], 1, 32, config.tabstop)) {
+                    error = "tabstop must be between 1 and 32";
+                    return false;
+                }
+                return true;
+            }
+
+            if (words[1] == "shiftwidth" || words[1] == "sw") {
+                if (!parseSmall(words[2], 0, 32, config.shiftwidth)) {
+                    error = "shiftwidth must be between 0 and 32";
                     return false;
                 }
                 return true;
@@ -185,6 +219,16 @@ namespace qalam {
         }
         if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0') {
             return std::string(home) + "/.config/qalam/keymap.conf";
+        }
+        return "";
+    }
+
+    std::string defaultHistoryPath() {
+        if (const char *xdg = std::getenv("XDG_STATE_HOME"); xdg != nullptr && *xdg != '\0') {
+            return std::string(xdg) + "/qalam/history";
+        }
+        if (const char *home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+            return std::string(home) + "/.local/state/qalam/history";
         }
         return "";
     }
