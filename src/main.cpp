@@ -10,7 +10,7 @@
 
 using namespace qalam;
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
     try {
         RawMode raw;
         AlternateScreen screen;
@@ -19,6 +19,7 @@ int main(int argc, char** argv) {
         for (int i = 1; i < argc; ++i) editor.edit(argv[i]);
         if (argc > 2) editor.selectBuffer(0);
         editor.useConfig(defaultConfigPath());
+        editor.loadHistory(defaultHistoryPath());
 
         Size size = windowSize();
         editor.resize(size);
@@ -39,7 +40,9 @@ int main(int argc, char** argv) {
             }
             if (key.type != KeyType::None) editor.handleKey(key);
         }
-    } catch (const std::exception& e) {
+
+        editor.saveHistory();
+    } catch (const std::exception &e) {
         std::fprintf(stderr, "%s\n", e.what());
         return 1;
     }
