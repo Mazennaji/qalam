@@ -2,6 +2,18 @@
 
 #include <algorithm>
 
+namespace {
+    int gTabStop = 4;
+}
+
+int tabStop() {
+    return gTabStop;
+}
+
+void setTabStop(int width) {
+    gTabStop = std::max(1, std::min(width, 32));
+}
+
 namespace qalam {
     namespace {
         struct Interval {
