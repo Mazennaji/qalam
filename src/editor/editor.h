@@ -34,6 +34,10 @@ namespace qalam {
 
         bool useConfig(const std::string &path);
 
+        void loadHistory(const std::string &path);
+
+        void saveHistory() const;
+
         void resize(Size size);
 
         void handleKey(const Key &key);
@@ -206,6 +210,8 @@ namespace qalam {
 
         void insertString(const std::string &text);
 
+        void insertTab();
+
         void insertNewline();
 
         void backspace();
@@ -223,6 +229,8 @@ namespace qalam {
         void replaceChars(const std::string &with, int count);
 
         void shiftLines(bool right, std::size_t first, std::size_t last);
+
+        std::size_t shiftWidth() const;
 
         void applyEdit(Pos start, Pos end, const std::string &text);
 
@@ -309,6 +317,8 @@ namespace qalam {
 
         void readFile(const std::string &path, std::size_t after);
 
+        void mapCommand(const std::string &argument, bool remove);
+
         void moveLeft(std::size_t n = 1);
 
         void moveRight(std::size_t n = 1);
@@ -369,6 +379,7 @@ namespace qalam {
         std::vector<Key> cmdKeys_;
         std::vector<Key> lastChange_;
         std::string configPath_;
+        std::string historyPath_;
         std::string path_;
         std::string message_;
         std::string commandText_;
@@ -422,10 +433,15 @@ namespace qalam {
         bool highlight_ = false;
         bool pendingG_ = false;
         bool quit_ = false;
-
+        bool number_ = false;
+        bool relative_ = false;
+        bool wrap_ = false;
+        int shiftwidth_ = 0;
+        bool expandtab_ = false;
+        bool autoindent_ = false;
+        bool historyOn_ = true;
         std::vector<std::size_t> tracked_;
         int batch_ = 0;
-
         std::vector<std::string> cmdHist_;
         std::vector<std::string> searchHist_;
         std::vector<std::string> complCands_;
@@ -438,9 +454,5 @@ namespace qalam {
         std::size_t complIdx_ = 0;
         bool complActive_ = false;
         bool promptReg_ = false;
-
-        bool number_ = false;
-        bool relative_ = false;
-        bool wrap_ = false;
     };
 }
