@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -72,6 +75,59 @@ namespace qalam {
 
         std::string describe(const std::string &path, std::size_t lines, std::size_t bytes) {
             return "\"" + path + "\" " + std::to_string(lines) + "L, " + std::to_string(bytes) + "B";
+        }
+
+        void remember(std::vector<std::string> &history, const std::string &text) {
+            if (text.empty()) return;
+            if (!history.empty() && history.back() == text) return;
+            history.push_back(text);
+            if (history.size() > 100) history.erase(history.begin());
+        }
+
+        bool takesFile(const std::string &name) {
+            static const char *const names[] = {
+                "e", "edit", "w", "write", "sp", "split", "vs",
+                "vsp", "vsplit", "r", "read", "wq", "x"
+            };
+            return std::any_of(std::begin(names), std::end(names),
+                               [&](const char *n) { return name == n; });
+        }
+
+        std::string commonPrefix(const std::vector<std::string> &items) {
+            std::string prefix = items.front();
+            for (const std::string &s: items) {
+                std::size_t i = 0;
+                while (i < prefix.size() && i < s.size() && prefix[i] == s[i]) ++i;
+                prefix.resize(i);
+            }
+            return prefix;
+        }
+
+        std::vector<std::string> fileCandidates(const std::string &typed) {
+            namespace fs = std::filesystem;
+
+            const std::size_t slash = typed.rfind('/');
+            const std::string dir = slash == std::string::npos ? "" : typed.substr(0, slash + 1);
+            const std::string stem = slash == std::string::npos ? typed : typed.substr(slash + 1);
+
+            std::vector<std::string> out;
+            std::error_code ec;
+            fs::directory_iterator it(dir.empty() ? "." : dir, ec);
+            if (ec) return out;
+
+            for (; it != fs::directory_iterator(); it.increment(ec)) {
+                if (ec) break;
+                const std::string name = it->path().filename().string();
+                if (name.compare(0, stem.size(), stem) != 0) continue;
+                if (name[0] == '.' && (stem.empty() || stem[0] != '.')) continue;
+
+                std::error_code probe;
+                const bool isDir = it->is_directory(probe);
+                out.push_back(dir + name + (isDir ? "/" : ""));
+                if (out.size() >= 200) break;
+            }
+            std::sort(out.begin(), out.end());
+            return out;
         }
 
         struct ViewPlace {
@@ -290,6 +346,11 @@ namespace qalam {
         number_ = config.number;
         relative_ = config.relativeNumber;
         wrap_ = config.wrap;
+        setTabStop(config.tabstop);
+        shiftwidth_ = config.shiftwidth;
+        expandtab_ = config.expandtab;
+        autoindent_ = config.autoindent;
+        historyOn_ = config.history;
         timeoutTicks_ = std::max(1, (config.timeoutMs + 99) / 100);
         mapPending_.clear();
         mapTicks_ = 0;
@@ -301,6 +362,35 @@ namespace qalam {
             }
         }
         return config.found;
+    }
+
+    void Editor::loadHistory(const std::string &path) {
+        historyPath_ = path;
+        if (!historyOn_ || path.empty()) return;
+
+        std::ifstream in(path);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.size() < 2) continue;
+            if (line[0] == ':') {
+                remember(cmdHist_, line.substr(1));
+            } else if (line[0] == '/') {
+                remember(searchHist_, line.substr(1));
+            }
+        }
+    }
+
+    void Editor::saveHistory() const {
+        if (!historyOn_ || historyPath_.empty()) return;
+
+        std::error_code ec;
+        const std::filesystem::path file(historyPath_);
+        if (file.has_parent_path()) std::filesystem::create_directories(file.parent_path(), ec);
+
+        std::ofstream out(historyPath_, std::ios::trunc);
+        if (!out) return;
+        for (const std::string &entry: cmdHist_) out << ':' << entry << '\n';
+        for (const std::string &entry: searchHist_) out << '/' << entry << '\n';
     }
 
     void Editor::resize(Size size) {
@@ -442,6 +532,13 @@ namespace qalam {
         if (recording_ != 0) modeName += std::string(" rec @") + recording_;
 
         v.commandLine = mode_ == Mode::Command || mode_ == Mode::Search;
+        if (mode_ == Mode::Command) {
+            v.promptCursor =
+                    1 + displayWidth(commandText_.substr(0, std::min(promptPos_, commandText_.size())));
+        } else if (mode_ == Mode::Search) {
+            v.promptCursor =
+                    1 + displayWidth(searchText_.substr(0, std::min(promptPos_, searchText_.size())));
+        }
         if (mode_ == Mode::Command) {
             v.message = ":" + commandText_;
         } else if (mode_ == Mode::Search) {
@@ -891,6 +988,7 @@ namespace qalam {
             case ':':
                 mode_ = Mode::Command;
                 commandText_.clear();
+                resetPrompt(0);
                 break;
             default: break;
         }
@@ -1086,6 +1184,7 @@ namespace qalam {
                 leaveVisual();
                 mode_ = Mode::Command;
                 commandText_ = std::to_string(first + 1) + "," + std::to_string(last + 1);
+                resetPrompt(commandText_.size());
                 return;
             }
             default: return;
@@ -1114,7 +1213,7 @@ namespace qalam {
                 break;
             case KeyType::Text: insertString(key.text);
                 break;
-            case KeyType::Tab: insertString("\t");
+            case KeyType::Tab: insertTab();
                 break;
             case KeyType::Enter: insertNewline();
                 break;
@@ -1143,65 +1242,46 @@ namespace qalam {
     }
 
     void Editor::handleCommandKey(const Key &key) {
-        switch (key.type) {
-            case KeyType::Char:
-                commandText_ += key.ch;
-                break;
-            case KeyType::Text:
-                commandText_ += key.text;
-                break;
-            case KeyType::Backspace:
-                if (commandText_.empty()) {
-                    mode_ = Mode::Normal;
-                } else {
-                    popLastChar(commandText_);
-                }
-                break;
-            case KeyType::Escape:
-                commandText_.clear();
-                mode_ = Mode::Normal;
-                break;
-            case KeyType::Enter: {
-                const std::string text = commandText_;
-                commandText_.clear();
-                mode_ = Mode::Normal;
-                runCommand(text);
-                break;
-            }
-            default: break;
+        if (key.type == KeyType::Escape || (key.type == KeyType::Ctrl && key.ch == 'c')) {
+            commandText_.clear();
+            mode_ = Mode::Normal;
+            return;
         }
+
+        if (key.type == KeyType::Backspace && commandText_.empty()) {
+            mode_ = Mode::Normal;
+            return;
+        }
+
+        if (key.type == KeyType::Enter) {
+            const std::string text = commandText_;
+            remember(cmdHist_, text);
+            commandText_.clear();
+            mode_ = Mode::Normal;
+            runCommand(text);
+            return;
+        }
+
+        promptKey(key);
     }
 
     void Editor::handleSearchKey(const Key &key) {
-        switch (key.type) {
-            case KeyType::Char:
-                searchText_ += key.ch;
-                previewSearch();
-                break;
-            case KeyType::Text:
-                searchText_ += key.text;
-                previewSearch();
-                break;
-            case KeyType::Tab:
-                searchText_ += '\t';
-                previewSearch();
-                break;
-            case KeyType::Backspace:
-                if (searchText_.empty()) {
-                    cancelSearch();
-                } else {
-                    popLastChar(searchText_);
-                    previewSearch();
-                }
-                break;
-            case KeyType::Escape:
-                cancelSearch();
-                break;
-            case KeyType::Enter:
-                commitSearch();
-                break;
-            default: break;
+        if (key.type == KeyType::Escape || (key.type == KeyType::Ctrl && key.ch == 'c')) {
+            cancelSearch();
+            return;
         }
+
+        if (key.type == KeyType::Backspace && searchText_.empty()) {
+            cancelSearch();
+            return;
+        }
+
+        if (key.type == KeyType::Enter) {
+            commitSearch();
+            return;
+        }
+
+        if (promptKey(key)) previewSearch();
     }
 
     void Editor::runCommand(const std::string &text) {
@@ -1378,6 +1458,12 @@ namespace qalam {
                     }
                 }
             }
+        } else if (name == "map") {
+            mapCommand(argument, false);
+        } else if (name == "unmap") {
+            mapCommand(argument, true);
+        } else if (name == "r" || name == "read") {
+            readFile(argument, last);
         } else if (name == "noh" || name == "nohlsearch") {
             highlight_ = false;
         } else if (name == "syntax") {
@@ -2015,6 +2101,7 @@ namespace qalam {
         mode_ = Mode::Search;
         searchForward_ = forward;
         searchText_.clear();
+        resetPrompt(0);
         searchOrigin_ = {row_, col_};
     }
 
@@ -2050,6 +2137,7 @@ namespace qalam {
 
         lastForward_ = searchForward_;
         if (!pattern.empty()) lastSearch_ = pattern;
+        remember(searchHist_, pattern);
 
         const char op = searchOp_;
         searchOp_ = 0;
@@ -2165,11 +2253,27 @@ namespace qalam {
         rememberColumn();
     }
 
+    void Editor::insertTab() {
+        if (!expandtab_) {
+            insertString("\t");
+            return;
+        }
+        const int width = tabStop();
+        const int column = renderColumn();
+        insertString(std::string(static_cast<std::size_t>(width - column % width), ' '));
+    }
+
     void Editor::insertNewline() {
-        applyEdit({row_, col_}, {row_, col_}, "\n");
+        std::string indent;
+        if (autoindent_) {
+            const std::string &line = buffer_->line(row_);
+            const std::size_t lead = std::min(line.find_first_not_of(" \t"), line.size());
+            indent = line.substr(0, std::min(lead, col_));
+        }
+        applyEdit({row_, col_}, {row_, col_}, "\n" + indent);
         ++row_;
-        col_ = 0;
-        wantedCol_ = 0;
+        col_ = indent.size();
+        rememberColumn();
     }
 
     void Editor::backspace() {
@@ -2203,14 +2307,21 @@ namespace qalam {
     }
 
     void Editor::openLine(bool below) {
+        std::string indent;
+        if (autoindent_) {
+            const std::string &line = buffer_->line(row_);
+            const std::size_t lead = std::min(line.find_first_not_of(" \t"), line.size());
+            indent = line.substr(0, lead);
+        }
+
         if (below) {
             const std::size_t length = buffer_->line(row_).size();
-            applyEdit({row_, length}, {row_, length}, "\n");
+            applyEdit({row_, length}, {row_, length}, "\n" + indent);
             ++row_;
         } else {
-            applyEdit({row_, 0}, {row_, 0}, "\n");
+            applyEdit({row_, 0}, {row_, 0}, indent + "\n");
         }
-        col_ = 0;
+        col_ = indent.size();
         enterInsert();
     }
 
@@ -2430,15 +2541,22 @@ namespace qalam {
         rememberColumn();
     }
 
+    std::size_t Editor::shiftWidth() const {
+        return shiftwidth_ > 0
+                   ? static_cast<std::size_t>(shiftwidth_)
+                   : static_cast<std::size_t>(tabStop());
+    }
+
     void Editor::shiftLines(bool right, std::size_t first, std::size_t last) {
         last = std::min(last, buffer_->lineCount() - 1);
-        const auto width = static_cast<std::size_t>(kTabStop);
+        const std::size_t width = shiftWidth();
+        const bool useTab = !expandtab_ && width == static_cast<std::size_t>(tabStop());
 
         for (std::size_t r = first; r <= last; ++r) {
             const std::string &line = buffer_->line(r);
             if (right) {
                 if (line.empty()) continue;
-                applyEdit({r, 0}, {r, 0}, std::string(width, ' '));
+                applyEdit({r, 0}, {r, 0}, useTab ? std::string("\t") : std::string(width, ' '));
             } else {
                 std::size_t n = 0;
                 if (!line.empty() && line[0] == '\t') {
@@ -3115,6 +3233,325 @@ namespace qalam {
         return true;
     }
 
+    std::string &Editor::promptText() {
+        return mode_ == Mode::Search ? searchText_ : commandText_;
+    }
+
+    void Editor::resetPrompt(std::size_t pos) {
+        promptPos_ = pos;
+        histIdx_ = kEnd;
+        histDraft_.clear();
+        complActive_ = false;
+        promptReg_ = false;
+    }
+
+    void Editor::insertPrompt(const std::string &text) {
+        std::string &line = promptText();
+        line.insert(promptPos_, text);
+        promptPos_ += text.size();
+    }
+
+    bool Editor::promptKey(const Key &key) {
+        std::string &text = promptText();
+        promptPos_ = snapToStart(text, std::min(promptPos_, text.size()));
+
+        if (promptReg_) {
+            promptReg_ = false;
+            complActive_ = false;
+
+            std::string insert;
+            if (key.type == KeyType::Ctrl && key.ch == 'w') {
+                const Pos at = mode_ == Mode::Search ? searchOrigin_ : Pos{row_, col_};
+                const std::string &line = buffer_->line(at.row);
+                auto isWord = [&](std::size_t i) {
+                    const auto u = static_cast<unsigned char>(line[i]);
+                    return std::isalnum(u) != 0 || u == '_' || u >= 128;
+                };
+                std::size_t i = at.col;
+                while (i < line.size() && !isWord(i)) ++i;
+                if (i < line.size()) {
+                    std::size_t start = i;
+                    while (start > 0 && isWord(start - 1)) --start;
+                    std::size_t stop = i;
+                    while (stop < line.size() && isWord(stop)) ++stop;
+                    insert = line.substr(start, stop - start);
+                }
+            } else if (key.type == KeyType::Char) {
+                if (key.ch == '"') {
+                    insert = reg_.text;
+                } else if (key.ch == '/') {
+                    insert = lastSearch_;
+                } else if (std::isalpha(static_cast<unsigned char>(key.ch)) != 0) {
+                    const auto it = named_.find(lowerChar(key.ch));
+                    if (it != named_.end()) insert = it->second.text;
+                }
+            }
+
+            if (!insert.empty() && insert.back() == '\n') insert.pop_back();
+            std::replace(insert.begin(), insert.end(), '\n', ' ');
+            insertPrompt(insert);
+            return true;
+        }
+
+        if (key.type != KeyType::Tab) complActive_ = false;
+        if (key.type != KeyType::Up && key.type != KeyType::Down) histIdx_ = kEnd;
+
+        switch (key.type) {
+            case KeyType::Left:
+                if (promptPos_ > 0) promptPos_ = prevCharStart(text, promptPos_);
+                return true;
+            case KeyType::Right:
+                if (promptPos_ < text.size()) promptPos_ += charLength(text, promptPos_);
+                return true;
+            case KeyType::Home:
+                promptPos_ = 0;
+                return true;
+            case KeyType::End:
+                promptPos_ = text.size();
+                return true;
+            case KeyType::Delete:
+                if (promptPos_ < text.size()) text.erase(promptPos_, charLength(text, promptPos_));
+                return true;
+            case KeyType::Backspace:
+                if (promptPos_ > 0) {
+                    const std::size_t previous = prevCharStart(text, promptPos_);
+                    text.erase(previous, promptPos_ - previous);
+                    promptPos_ = previous;
+                }
+                return true;
+            case KeyType::Up:
+                historyStep(true);
+                return true;
+            case KeyType::Down:
+                historyStep(false);
+                return true;
+            case KeyType::Tab:
+                if (mode_ == Mode::Command) {
+                    completeCommand();
+                } else {
+                    insertPrompt("\t");
+                }
+                return true;
+            case KeyType::Char:
+                insertPrompt(std::string(1, key.ch));
+                return true;
+            case KeyType::Text:
+                insertPrompt(key.text);
+                return true;
+            case KeyType::Ctrl:
+                switch (key.ch) {
+                    case 'b': promptPos_ = 0;
+                        return true;
+                    case 'e': promptPos_ = text.size();
+                        return true;
+                    case 'u':
+                        text.erase(0, promptPos_);
+                        promptPos_ = 0;
+                        return true;
+                    case 'w': {
+                        std::size_t start = promptPos_;
+                        while (start > 0 && text[start - 1] == ' ') --start;
+                        while (start > 0 && text[start - 1] != ' ') start = prevCharStart(text, start);
+                        text.erase(start, promptPos_ - start);
+                        promptPos_ = start;
+                        return true;
+                    }
+                    case 'r':
+                        promptReg_ = true;
+                        return true;
+                    default: return false;
+                }
+            default: return false;
+        }
+    }
+
+    void Editor::historyStep(bool older) {
+        std::vector<std::string> &hist = mode_ == Mode::Search ? searchHist_ : cmdHist_;
+        std::string &text = promptText();
+        if (hist.empty()) return;
+
+        if (histIdx_ == kEnd) {
+            if (!older) return;
+            histDraft_ = text;
+        }
+
+        auto matches = [&](std::size_t k) {
+            return hist[k].compare(0, histDraft_.size(), histDraft_) == 0;
+        };
+
+        std::size_t i = histIdx_ == kEnd ? hist.size() : histIdx_;
+        if (older) {
+            while (i > 0) {
+                --i;
+                if (matches(i)) {
+                    histIdx_ = i;
+                    text = hist[i];
+                    promptPos_ = text.size();
+                    return;
+                }
+            }
+            return;
+        }
+
+        while (++i < hist.size()) {
+            if (matches(i)) {
+                histIdx_ = i;
+                text = hist[i];
+                promptPos_ = text.size();
+                return;
+            }
+        }
+        text = histDraft_;
+        histIdx_ = kEnd;
+        promptPos_ = text.size();
+    }
+
+    void Editor::completeCommand() {
+        std::string &text = commandText_;
+
+        if (!complActive_) {
+            const std::string before = text.substr(0, promptPos_);
+            std::size_t lead = 0;
+            while (lead < before.size() &&
+                   std::string("0123456789,.$%").find(before[lead]) != std::string::npos) {
+                ++lead;
+            }
+
+            const std::size_t space = before.find_last_of(' ');
+            const bool command = space == std::string::npos;
+            const std::size_t start = command ? lead : space + 1;
+            const std::string base = before.substr(start);
+
+            std::vector<std::string> cands;
+            if (command) {
+                static const char *const names[] = {
+                    "b", "bd", "bdelete", "bn", "bnext", "bp",
+                    "bprev", "bprevious", "buffer", "buffers", "close", "copy",
+                    "delete", "di", "display", "e", "edit", "khalas",
+                    "ls", "map", "move", "noh", "nohlsearch", "normal",
+                    "only", "q", "qa", "qall", "quit", "r",
+                    "read", "reg", "registers", "reload", "se", "set",
+                    "sp", "split", "syntax", "unmap", "vs", "vsp",
+                    "vsplit", "w", "wa", "wall", "wq", "wqa",
+                    "write", "x", "xa", "yank"
+                };
+                for (const char *n: names) cands.emplace_back(n);
+                for (const auto &entry: aliases_) cands.push_back(entry.first);
+                cands.erase(std::remove_if(cands.begin(), cands.end(),
+                                           [&](const std::string &c) {
+                                               return c.compare(0, base.size(), base) != 0;
+                                           }),
+                            cands.end());
+                std::sort(cands.begin(), cands.end());
+                cands.erase(std::unique(cands.begin(), cands.end()), cands.end());
+            } else {
+                const std::size_t firstSpace = before.find(' ', lead);
+                const std::string word = before.substr(lead, firstSpace - lead);
+                if (!takesFile(word)) return;
+                cands = fileCandidates(base);
+            }
+            if (cands.empty()) return;
+
+            complStart_ = start;
+            complBase_ = base;
+            complTail_ = text.substr(promptPos_);
+
+            if (cands.size() == 1) {
+                const std::string pick = cands[0] + (command ? " " : "");
+                text = text.substr(0, start) + pick + complTail_;
+                promptPos_ = start + pick.size();
+                return;
+            }
+
+            const std::string common = commonPrefix(cands);
+            if (common.size() > base.size()) {
+                text = text.substr(0, start) + common + complTail_;
+                promptPos_ = start + common.size();
+                return;
+            }
+
+            complCands_ = cands;
+            complIdx_ = 0;
+            complActive_ = true;
+        } else {
+            complIdx_ = (complIdx_ + 1) % (complCands_.size() + 1);
+        }
+
+        const std::string pick =
+                complIdx_ == complCands_.size() ? complBase_ : complCands_[complIdx_];
+        text = text.substr(0, complStart_) + pick + complTail_;
+        promptPos_ = complStart_ + pick.size();
+    }
+
+    void Editor::readFile(const std::string &path, std::size_t after) {
+        if (path.empty()) {
+            message_ = "usage: :r FILE";
+            return;
+        }
+
+        LineBuffer incoming;
+        const LoadResult result = loadFile(path, incoming);
+        if (result.status != LoadStatus::Loaded) {
+            message_ = "Can't read \"" + path + "\"";
+            return;
+        }
+        if (result.bytes == 0) {
+            message_ = "\"" + path + "\" is empty";
+            return;
+        }
+
+        const std::size_t count = incoming.lineCount();
+        const std::string block = incoming.text({0, 0}, {count - 1, incoming.line(count - 1).size()});
+
+        after = std::min(after, buffer_->lineCount() - 1);
+        insertLinesAfter(after + 1, block);
+        placeCursor({after + 1, firstNonBlank(*buffer_, {after + 1, 0}).target.col});
+        message_ = std::to_string(count) + (count == 1 ? " line" : " lines") + " read from \"" +
+                   path + "\"";
+    }
+
+    void Editor::mapCommand(const std::string &argument, bool remove) {
+        std::istringstream stream(argument);
+        std::vector<std::string> words;
+        std::string word;
+        while (stream >> word) words.push_back(word);
+
+        const std::size_t expected = remove ? 2 : 3;
+        if (words.size() != expected) {
+            message_ = remove ? "usage: :unmap MODE KEYS" : "usage: :map MODE KEYS KEYS";
+            return;
+        }
+
+        std::optional<MapMode> mode;
+        if (words[0] == "normal" || words[0] == "n") mode = MapMode::Normal;
+        if (words[0] == "insert" || words[0] == "i") mode = MapMode::Insert;
+        if (words[0] == "visual" || words[0] == "v") mode = MapMode::Visual;
+        if (!mode) {
+            message_ = "Unknown mode: " + words[0];
+            return;
+        }
+
+        std::string error;
+        const std::optional<std::vector<Key> > lhs = parseKeys(words[1], error);
+        if (!lhs || lhs->empty()) {
+            message_ = "Invalid keys" + (error.empty() ? std::string() : ": " + error);
+            return;
+        }
+
+        if (remove) {
+            message_ = keymap_.remove(*mode, *lhs) ? "Mapping removed" : "No such mapping";
+            return;
+        }
+
+        const std::optional<std::vector<Key> > rhs = parseKeys(words[2], error);
+        if (!rhs) {
+            message_ = "Invalid keys: " + error;
+            return;
+        }
+        keymap_.add(*mode, *lhs, *rhs);
+        message_ = "Mapped " + words[1];
+    }
+
     void Editor::moveLeft(std::size_t n) {
         const std::string &line = buffer_->line(row_);
         for (std::size_t i = 0; i < n && col_ > 0; ++i) col_ = prevCharStart(line, col_);
@@ -3250,6 +3687,30 @@ namespace qalam {
     }
 
     bool Editor::setOption(const std::string &raw) {
+        const std::size_t eq = raw.find('=');
+        if (eq != std::string::npos) {
+            const std::string key = raw.substr(0, eq);
+            const std::string value = raw.substr(eq + 1);
+            const bool digits = !value.empty() && value.size() <= 3 &&
+                                std::all_of(value.begin(), value.end(), [](char c) {
+                                    return std::isdigit(static_cast<unsigned char>(c)) != 0;
+                                });
+            if (!digits) return false;
+            const int n = std::stoi(value);
+
+            if (key == "tabstop" || key == "ts") {
+                if (n < 1 || n > 32) return false;
+                setTabStop(n);
+                return true;
+            }
+            if (key == "shiftwidth" || key == "sw") {
+                if (n > 32) return false;
+                shiftwidth_ = n;
+                return true;
+            }
+            return false;
+        }
+
         std::string name = raw;
         bool toggle = false;
         bool value = true;
@@ -3270,8 +3731,12 @@ namespace qalam {
             target = &relative_;
         } else if (name == "wrap") {
             target = &wrap_;
+        } else if (name == "expandtab" || name == "et") {
+            target = &expandtab_;
+        } else if (name == "autoindent" || name == "ai") {
+            target = &autoindent_;
         } else if (name == "syntax") {
-            bool current = syntax_.enabled();
+            const bool current = syntax_.enabled();
             syntax_.setEnabled(toggle ? !current : value);
             return true;
         } else {
@@ -3288,6 +3753,10 @@ namespace qalam {
         text += relative_ ? " relativenumber" : " norelativenumber";
         text += wrap_ ? " wrap" : " nowrap";
         text += syntax_.enabled() ? " syntax" : " nosyntax";
+        text += expandtab_ ? " expandtab" : " noexpandtab";
+        text += autoindent_ ? " autoindent" : " noautoindent";
+        text += " ts=" + std::to_string(tabStop());
+        text += " sw=" + std::to_string(shiftWidth());
         return text;
     }
 
