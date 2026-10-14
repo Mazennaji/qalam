@@ -6,8 +6,6 @@
 #include <vector>
 
 namespace qalam {
-    constexpr int kTabStop = 4;
-
     int tabStop();
 
     void setTabStop(int width);
@@ -36,4 +34,4 @@ namespace qalam {
     int wrapHeight(const std::string &line, int width);
 
     void popLastChar(std::string &text);
-} // namespace qalam
+}
