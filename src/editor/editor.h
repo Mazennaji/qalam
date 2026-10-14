@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <array>
 
 #include "buffer/text_buffer.h"
 #include "config/config.h"
@@ -273,6 +274,10 @@ namespace qalam {
 
         bool anyPending() const;
 
+        void storeRegisters(bool yank, const Register &before);
+
+        std::optional<Register> fetchRegister(char name);
+
         void setMark(char name);
 
         std::optional<Pos> markPos(char name) const;
@@ -396,6 +401,9 @@ namespace qalam {
         int colOff_ = 0;
         FindState lastFind_;
         Register reg_;
+        std::array<Register, 10> numbered_;
+        Register small_;
+        Register clip_;
         std::map<char, Register> named_;
         std::map<char, std::vector<Key> > macros_;
         std::vector<Key> recordKeys_;
