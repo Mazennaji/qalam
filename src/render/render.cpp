@@ -64,7 +64,6 @@ namespace qalam {
             return std::string(style) + text + " \x1b[m";
         }
 
-
         std::size_t appendTextRow(std::string &out, const std::string &line, std::size_t row,
                                   int colOffset, int cols, const std::string &pattern,
                                   const std::optional<Selection> &selection, const Syntax *syntax,
@@ -175,77 +174,49 @@ namespace qalam {
             if (w.rect.rows < 2 || w.rect.cols < 1) continue;
 
             const int textRows = w.rect.rows - 1;
-            const auto width = static_cast<std::size_t>(w.rect.cols);
             const std::size_t lineCount = w.buffer != nullptr ? w.buffer->lineCount() : 0;
             const bool highlight = w.syntax != nullptr && w.syntax->active();
+            const bool numbers = w.number || w.relative;
+            const int gutter = gutterWidth(numbers, lineCount, w.rect.cols);
+            const int textCols = w.rect.cols - gutter;
+            const auto width = static_cast<std::size_t>(textCols);
 
-            for (const WindowView &w: view.windows) {
-                if (w.rect.rows < 2 || w.rect.cols < 1) continue;
-
-                const int textRows = w.rect.rows - 1;
-                const std::size_t lineCount = w.buffer != nullptr ? w.buffer->lineCount() : 0;
-                const bool highlight = w.syntax != nullptr && w.syntax->active();
-                const bool numbers = w.number || w.relative;
-                const int gutter = gutterWidth(numbers, lineCount, w.rect.cols);
-                const int textCols = w.rect.cols - gutter;
-                const auto width = static_cast<std::size_t>(textCols);
-
-                int y = 0;
-                std::size_t row = w.rowOffset;
-                while (y < textRows) {
-                    if (row >= lineCount) {
-                        out += moveTo(w.rect.row + y + 1, w.rect.col + 1);
-                        out.append(static_cast<std::size_t>(gutter), ' ');
-                        std::size_t used = 0;
-                        if (w.showWelcome && y == textRows / 3) {
-                            used = appendWelcome(out, textCols);
-                        } else {
-                            out += '~';
-                            used = 1;
-                        }
-                        if (used < width) out.append(width - used, ' ');
-                        ++y;
-                        continue;
+            int y = 0;
+            std::size_t row = w.rowOffset;
+            while (y < textRows) {
+                if (row >= lineCount) {
+                    out += moveTo(w.rect.row + y + 1, w.rect.col + 1);
+                    out.append(static_cast<std::size_t>(gutter), ' ');
+                    std::size_t used = 0;
+                    if (w.showWelcome && y == textRows / 3) {
+                        used = appendWelcome(out, textCols);
+                    } else {
+                        out += '~';
+                        used = 1;
                     }
-
-                    const std::string &line = w.buffer->line(row);
-                    const int segments = w.wrap ? wrapHeight(line, textCols) : 1;
-                    const std::vector<Kind> *kinds = nullptr;
-                    if (highlight) kinds = &w.syntax->kinds(*w.buffer, row);
-
-                    for (int seg = 0; seg < segments && y < textRows; ++seg, ++y) {
-                        out += moveTo(w.rect.row + y + 1, w.rect.col + 1);
-                        if (gutter > 0) {
-                            out += gutterText(row, w.line, w.number, w.relative, gutter, seg == 0);
-                        }
-
-                        const int offset = w.wrap ? seg * textCols : w.colOffset;
-                        const std::size_t used =
-                                appendTextRow(out, line, row, offset, textCols, view.searchPattern,
-                                              w.selection, w.syntax, kinds);
-                        if (used < width) out.append(width - used, ' ');
-                    }
-                    ++row;
+                    if (used < width) out.append(width - used, ' ');
+                    ++y;
+                    continue;
                 }
 
-                const std::string name = w.fileName.empty() ? "[No Name]" : w.fileName;
-                const std::string flag = w.modified ? " [+]" : "";
-                const std::string left =
-                        w.active ? " " + w.mode + " | " + name + flag : " " + name + flag;
-                const std::string right =
-                        "Ln " + std::to_string(w.line + 1) + ", Col " + std::to_string(w.col + 1) + " ";
+                const std::string &line = w.buffer->line(row);
+                const int segments = w.wrap ? wrapHeight(line, textCols) : 1;
+                const std::vector<Kind> *kinds = nullptr;
+                if (highlight) kinds = &w.syntax->kinds(*w.buffer, row);
 
-                out += moveTo(w.rect.row + textRows + 1, w.rect.col + 1);
-                out += w.active ? "\x1b[7m" : "\x1b[7;2m";
-                out += fitWidth(left, right, w.rect.cols);
-                out += "\x1b[m";
+                for (int seg = 0; seg < segments && y < textRows; ++seg, ++y) {
+                    out += moveTo(w.rect.row + y + 1, w.rect.col + 1);
+                    if (gutter > 0) {
+                        out += gutterText(row, w.line, w.number, w.relative, gutter, seg == 0);
+                    }
 
-                if (w.active) {
-                    const int r = std::clamp(w.cursorRow, 0, textRows - 1);
-                    const int c = std::clamp(w.cursorCol, 0, w.rect.cols - 1);
-                    cursorRow = w.rect.row + r + 1;
-                    cursorCol = w.rect.col + c + 1;
+                    const int offset = w.wrap ? seg * textCols : w.colOffset;
+                    const std::size_t used =
+                            appendTextRow(out, line, row, offset, textCols, view.searchPattern,
+                                          w.selection, w.syntax, kinds);
+                    if (used < width) out.append(width - used, ' ');
                 }
+                ++row;
             }
 
             const std::string name = w.fileName.empty() ? "[No Name]" : w.fileName;
@@ -261,10 +232,10 @@ namespace qalam {
             out += "\x1b[m";
 
             if (w.active) {
-                const int row = std::clamp(w.cursorRow, 0, textRows - 1);
-                const int col = std::clamp(w.cursorCol, 0, w.rect.cols - 1);
-                cursorRow = w.rect.row + row + 1;
-                cursorCol = w.rect.col + col + 1;
+                const int r = std::clamp(w.cursorRow, 0, textRows - 1);
+                const int c = std::clamp(w.cursorCol, 0, w.rect.cols - 1);
+                cursorRow = w.rect.row + r + 1;
+                cursorCol = w.rect.col + c + 1;
             }
         }
 
