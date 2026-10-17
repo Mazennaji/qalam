@@ -370,6 +370,8 @@ namespace qalam {
 
         std::string optionSummary() const;
 
+        void refreshSyntax();
+
         std::unique_ptr<TextBuffer> buffer_;
         UndoHistory history_;
         std::vector<Doc> docs_;
@@ -385,6 +387,7 @@ namespace qalam {
         std::vector<Key> lastChange_;
         std::string configPath_;
         std::string historyPath_;
+        std::string filetype_;
         std::string path_;
         std::string message_;
         std::string commandText_;
