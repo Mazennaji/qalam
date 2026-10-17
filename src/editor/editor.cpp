@@ -12,6 +12,7 @@
 
 #include "buffer/file_io.h"
 #include "buffer/line_buffer.h"
+#include "clipboard/clipboard.h"
 #include "input/key_notation.h"
 #include "search/substitute.h"
 #include "text/columns.h"
@@ -419,7 +420,8 @@ namespace qalam {
             case Mode::Normal:
                 return !anyPending() && selReg_ == 0;
             case Mode::Visual:
-                return pendingFind_ == 0 && pendingMark_ == 0 && !pendingG_ && count_ == 0;
+                return pendingFind_ == 0 && pendingMark_ == 0 && !pendingRegister_ &&
+                       selReg_ == 0 && !pendingG_ && count_ == 0;
             case Mode::Command:
             case Mode::Search:
                 return false;
@@ -680,7 +682,8 @@ namespace qalam {
             if (key.type == KeyType::Char && key.ch == '"') {
                 selReg_ = 0;
             } else if (key.type == KeyType::Char &&
-                       std::isalpha(static_cast<unsigned char>(key.ch)) != 0) {
+                       (std::isalnum(static_cast<unsigned char>(key.ch)) != 0 ||
+                        key.ch == '_' || key.ch == '+' || key.ch == '*' || key.ch == '-')) {
                 selReg_ = key.ch;
             } else {
                 resetPending();
@@ -1051,7 +1054,7 @@ namespace qalam {
     }
 
     void Editor::handleVisualKey(const Key &key) {
-        if (pendingFind_ != 0 || pendingMark_ != 0) {
+        if (pendingFind_ != 0 || pendingMark_ != 0 || pendingRegister_) {
             handleNormalKey(key);
             return;
         }
@@ -1127,6 +1130,7 @@ namespace qalam {
             case 'G':
             case 'g':
             case '%':
+            case '"':
             case '`':
             case '\'':
                 handleNormalKey(key);
@@ -1981,6 +1985,7 @@ namespace qalam {
         takeCount();
 
         const BlockBounds bounds = blockBounds();
+        const Register before = reg_;
 
         reg_.rows.clear();
         reg_.text.clear();
@@ -1995,6 +2000,7 @@ namespace qalam {
         }
         reg_.linewise = false;
         reg_.block = true;
+        storeRegisters(op == 'y', before);
 
         mode_ = Mode::Normal;
         row_ = bounds.top;
@@ -2057,6 +2063,18 @@ namespace qalam {
 
     void Editor::visualPut() {
         const int n = takeCount();
+
+        const char sel = selReg_;
+        selReg_ = 0;
+        if (sel != 0) {
+            const std::optional<Register> source = fetchRegister(sel);
+            if (!source || source->text.empty()) {
+                message_ = std::string("Register ") + sel + " is empty";
+                leaveVisual();
+                return;
+            }
+            reg_ = *source;
+        }
 
         if (reg_.text.empty()) {
             message_ = "Nothing in register";
@@ -2480,6 +2498,7 @@ namespace qalam {
             return;
         }
 
+        const Register before = reg_;
         reg_.block = false;
         reg_.rows.clear();
 
@@ -2492,7 +2511,7 @@ namespace qalam {
             reg_.text = buffer_->text(range.start, range.end);
             reg_.linewise = false;
         }
-        storeNamed();
+        storeRegisters(op == 'y', before);
 
         if (op == 'y') {
             row_ = range.start.row;
@@ -2744,19 +2763,81 @@ namespace qalam {
             return;
         }
 
-        const char name = lowerChar(selReg_);
+        const char name = selReg_;
         selReg_ = 0;
 
-        const auto it = named_.find(name);
-        if (it == named_.end() || it->second.text.empty()) {
+        const std::optional<Register> source = fetchRegister(name);
+        if (!source || source->text.empty()) {
             message_ = std::string("Register ") + name + " is empty";
             return;
         }
 
         const Register saved = reg_;
-        reg_ = it->second;
+        reg_ = *source;
         putFrom(after, count);
         reg_ = saved;
+    }
+
+    void Editor::storeRegisters(bool yank, const Register &before) {
+        const char sel = selReg_;
+        selReg_ = 0;
+
+        if (sel == '_') {
+            reg_ = before;
+            return;
+        }
+
+        if (sel == 0 || sel == '"') {
+            if (yank) {
+                numbered_[0] = reg_;
+            } else if (reg_.linewise || reg_.text.find('\n') != std::string::npos) {
+                for (std::size_t i = 9; i > 1; --i) numbered_[i] = numbered_[i - 1];
+                numbered_[1] = reg_;
+            } else {
+                small_ = reg_;
+            }
+            return;
+        }
+
+        if (sel == '+' || sel == '*') {
+            clip_ = reg_;
+            clipboardWrite(reg_.text);
+            return;
+        }
+
+        if (std::isalpha(static_cast<unsigned char>(sel)) != 0) {
+            selReg_ = sel;
+            storeNamed();
+        }
+    }
+
+    std::optional<Editor::Register> Editor::fetchRegister(char name) {
+        if (name == '"') return reg_;
+        if (name == '_') return std::nullopt;
+        if (name == '-') return small_;
+
+        if (name >= '0' && name <= '9') return numbered_[static_cast<std::size_t>(name - '0')];
+
+        if (name == '+' || name == '*') {
+            const std::optional<std::string> text = clipboardRead();
+            if (!text) {
+                if (clip_.text.empty()) return std::nullopt;
+                return clip_;
+            }
+            if (*text == clip_.text) return clip_;
+
+            Register r;
+            r.text = *text;
+            r.linewise = !text->empty() && text->back() == '\n';
+            return r;
+        }
+
+        if (std::isalpha(static_cast<unsigned char>(name)) != 0) {
+            const auto it = named_.find(lowerChar(name));
+            if (it == named_.end()) return std::nullopt;
+            return it->second;
+        }
+        return std::nullopt;
     }
 
     void Editor::storeNamed() {
@@ -2854,6 +2935,11 @@ namespace qalam {
         };
 
         if (!reg_.text.empty()) add("\"\"", preview(reg_.text));
+        for (std::size_t i = 0; i < numbered_.size(); ++i) {
+            if (numbered_[i].text.empty()) continue;
+            add(std::string("\"") + static_cast<char>('0' + i), preview(numbered_[i].text));
+        }
+        if (!small_.text.empty()) add("\"-", preview(small_.text));
         for (const auto &[name, content]: named_) {
             if (!content.text.empty()) add(std::string("\"") + name, preview(content.text));
         }
@@ -3277,13 +3363,10 @@ namespace qalam {
                     insert = line.substr(start, stop - start);
                 }
             } else if (key.type == KeyType::Char) {
-                if (key.ch == '"') {
-                    insert = reg_.text;
-                } else if (key.ch == '/') {
+                if (key.ch == '/') {
                     insert = lastSearch_;
-                } else if (std::isalpha(static_cast<unsigned char>(key.ch)) != 0) {
-                    const auto it = named_.find(lowerChar(key.ch));
-                    if (it != named_.end()) insert = it->second.text;
+                } else if (const std::optional<Register> r = fetchRegister(key.ch)) {
+                    insert = r->text;
                 }
             }
 
