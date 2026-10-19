@@ -311,7 +311,8 @@ namespace qalam {
                 message_ = "Cannot read \"" + path + "\"";
                 break;
         }
-        syntax_.setFile(path_);
+        filetype_.clear();
+        refreshSyntax();
         mode_ = Mode::Normal;
         row_ = 0;
         col_ = 0;
@@ -1476,7 +1477,9 @@ namespace qalam {
             } else if (argument == "off") {
                 syntax_.setEnabled(false);
             } else if (argument.empty()) {
-                message_ = syntax_.enabled() ? "syntax on" : "syntax off";
+                message_ = syntax_.enabled()
+                               ? "syntax on (" + syntax_.languageName() + ")"
+                               : "syntax off";
             } else {
                 message_ = "usage: :syntax on|off";
             }
@@ -1506,7 +1509,7 @@ namespace qalam {
 
         if (path_.empty()) {
             path_ = target;
-            syntax_.setFile(path_);
+            refreshSyntax();
         }
         if (target == path_) history_.markSaved();
         message_ = describe(target, countLines(*buffer_, *bytes), *bytes) + " written";
@@ -1564,6 +1567,8 @@ namespace qalam {
         doc.marks = std::move(marks_);
         doc.jumps = std::move(jumps_);
         doc.jumpIdx = jumpIdx_;
+        doc.filetype = std::move(filetype_);
+        filetype_.clear();
         marks_.clear();
         jumps_.clear();
     }
@@ -1581,13 +1586,14 @@ namespace qalam {
         marks_ = std::move(doc.marks);
         jumps_ = std::move(doc.jumps);
         jumpIdx_ = doc.jumpIdx;
+        filetype_ = doc.filetype;
         current_ = index;
 
         mode_ = Mode::Normal;
         blockInsert_.active = false;
         cmdKeys_.clear();
         resetPending();
-        syntax_.setFile(path_);
+        refreshSyntax();
         row_ = std::min(row_, buffer_->lineCount() - 1);
         col_ = snapToStart(buffer_->line(row_), std::min(col_, maxColumn(row_)));
     }
@@ -1659,7 +1665,8 @@ namespace qalam {
             colOff_ = 0;
             mode_ = Mode::Normal;
             resetPending();
-            syntax_.setFile("");
+            filetype_.clear();
+            refreshSyntax();
             message_ = "Buffer closed";
             return;
         }
@@ -3774,6 +3781,19 @@ namespace qalam {
         if (eq != std::string::npos) {
             const std::string key = raw.substr(0, eq);
             const std::string value = raw.substr(eq + 1);
+
+            if (key == "filetype" || key == "ft") {
+                if (value.empty()) {
+                    filetype_.clear();
+                    refreshSyntax();
+                    return true;
+                }
+                if (!syntax_.knows(value)) return false;
+                filetype_ = value;
+                refreshSyntax();
+                return true;
+            }
+
             const bool digits = !value.empty() && value.size() <= 3 &&
                                 std::all_of(value.begin(), value.end(), [](char c) {
                                     return std::isdigit(static_cast<unsigned char>(c)) != 0;
@@ -3840,7 +3860,17 @@ namespace qalam {
         text += autoindent_ ? " autoindent" : " noautoindent";
         text += " ts=" + std::to_string(tabStop());
         text += " sw=" + std::to_string(shiftWidth());
+        text += " ft=" + syntax_.languageName();
         return text;
+    }
+
+    void Editor::refreshSyntax() {
+        syntax_.setFile(path_);
+        if (!filetype_.empty()) {
+            syntax_.setLanguage(filetype_);
+        } else {
+            syntax_.sniff(buffer_->line(0));
+        }
     }
 
     std::size_t Editor::maxColumn(std::size_t row) const {
