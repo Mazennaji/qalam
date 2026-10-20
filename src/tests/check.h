@@ -37,7 +37,7 @@ namespace qt {
                 << "    left:  " << a << "\n    right: " << b << "\n";
         std::cerr << out.str();
     }
-} // namespace qt
+}
 
 #define TEST(name)                                                  \
 static void test_##name();                                      \
