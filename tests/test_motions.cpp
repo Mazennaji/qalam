@@ -120,7 +120,12 @@ TEST(object_quotes) {
 
     const auto around = textObject(b, {0, 8}, '"', true, 1);
     CHECK(around.has_value());
-    CHECK_EQ(b.text(around->start, around->end), std::string("\"hello world\""));
+    CHECK_EQ(b.text(around->start, around->end), std::string("\"hello world\" "));
+
+    const LineBuffer tail = make("say \"hi\"");
+    const auto atEnd = textObject(tail, {0, 6}, '"', true, 1);
+    CHECK(atEnd.has_value());
+    CHECK_EQ(tail.text(atEnd->start, atEnd->end), std::string("\"hi\""));
 }
 
 TEST(object_parens) {

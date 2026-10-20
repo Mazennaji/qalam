@@ -76,6 +76,7 @@ namespace qalam {
             std::map<char, Pos> marks;
             std::vector<Pos> jumps;
             std::size_t jumpIdx = 0;
+            std::string filetype;
         };
 
         struct Window {

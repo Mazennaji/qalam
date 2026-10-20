@@ -81,10 +81,10 @@ TEST(syntax_cpp_block_comment_spans_lines) {
     const LineBuffer b = make("/* one\ntwo */ int x;");
     CHECK(at(s, b, 0, 3) == Kind::Comment);
     CHECK(at(s, b, 1, 1) == Kind::Comment);
-    CHECK(at(s, b, 1, 4) == Kind::Normal);
+    CHECK(at(s, b, 1, 5) == Kind::Comment);
+    CHECK(at(s, b, 1, 6) == Kind::Normal);
     CHECK(at(s, b, 1, 8) == Kind::Type);
 }
-
 TEST(syntax_cpp_raw_string_spans_lines) {
     Syntax s;
     s.setFile("a.cpp");
