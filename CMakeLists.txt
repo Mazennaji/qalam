@@ -6,9 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release)
-endif()
+endif ()
 
 add_executable(qalam
         src/main.cpp
@@ -52,6 +52,34 @@ add_executable(qalam
         src/clipboard/clipboard.cpp
         src/clipboard/clipboard.h
 )
+
+option(QALAM_BUILD_TESTS "Build the unit tests" ON)
+
+if (QALAM_BUILD_TESTS)
+    enable_testing()
+
+    add_executable(qalam_tests
+            tests/test_main.cpp
+            tests/test_text.cpp
+            tests/test_buffer.cpp
+            tests/test_regex.cpp
+            tests/test_motions.cpp
+            tests/test_syntax.cpp
+            src/text/columns.cpp
+            src/buffer/line_buffer.cpp
+            src/undo/history.cpp
+            src/search/regex.cpp
+            src/search/search.cpp
+            src/search/substitute.cpp
+            src/motions/motions.cpp
+            src/motions/objects.cpp
+            src/syntax/syntax.cpp)
+
+    target_include_directories(qalam_tests PRIVATE src tests)
+    target_compile_features(qalam_tests PRIVATE cxx_std_20)
+
+    add_test(NAME unit COMMAND qalam_tests)
+endif ()
 
 target_include_directories(qalam PRIVATE src)
 target_compile_options(qalam PRIVATE -Wall -Wextra -Wpedantic)
