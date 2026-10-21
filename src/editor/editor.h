@@ -49,6 +49,16 @@ namespace qalam {
 
         ViewState view() const;
 
+        void setText(const std::string &text);
+
+        std::string bufferText() const;
+
+        Pos cursor() const;
+
+        Mode mode() const;
+
+        const std::string &message() const;
+
     private:
         struct FindState {
             std::string target;
