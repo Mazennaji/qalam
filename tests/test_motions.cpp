@@ -125,7 +125,12 @@ TEST(object_quotes) {
     const LineBuffer tail = make("say \"hi\"");
     const auto atEnd = textObject(tail, {0, 6}, '"', true, 1);
     CHECK(atEnd.has_value());
-    CHECK_EQ(tail.text(atEnd->start, atEnd->end), std::string("\"hi\""));
+    CHECK_EQ(tail.text(atEnd->start, atEnd->end), std::string(" \"hi\""));
+
+    const LineBuffer bare = make("\"hi\"");
+    const auto whole = textObject(bare, {0, 1}, '"', true, 1);
+    CHECK(whole.has_value());
+    CHECK_EQ(bare.text(whole->start, whole->end), std::string("\"hi\""));
 }
 
 TEST(object_parens) {
