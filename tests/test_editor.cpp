@@ -266,7 +266,8 @@ TEST(ed_visual_modes) {
 }
 
 TEST(ed_visual_block) {
-    CHECK_EQ(Ed("abc\nabc\nabc").feed("<C-v>jlld").text(), std::string("c\nc\nabc"));
+    CHECK_EQ(Ed("abc\nabc\nabc").feed("<C-v>jld").text(), std::string("c\nc\nabc"));
+    CHECK_EQ(Ed("abc\nabc\nabc").feed("<C-v>jlld").text(), std::string("\n\nabc"));
     CHECK_EQ(Ed("ab\nab\nab").feed("<C-v>jjIX<Esc>").text(), std::string("Xab\nXab\nXab"));
     CHECK_EQ(Ed("ab\nab").feed("<C-v>jAX<Esc>").text(), std::string("aXb\naXb"));
 }
