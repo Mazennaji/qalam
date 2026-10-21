@@ -301,10 +301,13 @@ namespace qalam {
         switch (result.status) {
             case LoadStatus::Loaded:
                 path_ = path;
+                crlf_ = result.crlf;
                 message_ = describe(path, countLines(*buffer_, result.bytes), result.bytes);
+                if (result.crlf) message_ += " [dos]";
                 break;
             case LoadStatus::NotFound:
                 path_ = path;
+                crlf_ = false;
                 message_ = "\"" + path + "\" [New]";
                 break;
             case LoadStatus::Failed:
@@ -1540,7 +1543,7 @@ namespace qalam {
             return false;
         }
 
-        const std::optional<std::size_t> bytes = saveFile(target, *buffer_);
+        const std::optional<std::size_t> bytes = saveFile(target, *buffer_, crlf_);
         if (!bytes) {
             message_ = "Cannot write \"" + target + "\"";
             return false;
@@ -1607,6 +1610,7 @@ namespace qalam {
         doc.jumps = std::move(jumps_);
         doc.jumpIdx = jumpIdx_;
         doc.filetype = std::move(filetype_);
+        doc.crlf = crlf_;
         filetype_.clear();
         marks_.clear();
         jumps_.clear();
@@ -1626,6 +1630,7 @@ namespace qalam {
         jumps_ = std::move(doc.jumps);
         jumpIdx_ = doc.jumpIdx;
         filetype_ = doc.filetype;
+        crlf_ = doc.crlf;
         current_ = index;
 
         mode_ = Mode::Normal;
@@ -1705,6 +1710,7 @@ namespace qalam {
             mode_ = Mode::Normal;
             resetPending();
             filetype_.clear();
+            crlf_ = false;
             refreshSyntax();
             message_ = "Buffer closed";
             return;
@@ -1795,7 +1801,7 @@ namespace qalam {
 
             Doc &doc = docs_[i];
             if (!doc.history.modified()) continue;
-            if (doc.path.empty() || !saveFile(doc.path, *doc.buffer)) {
+            if (doc.path.empty() || !saveFile(doc.path, *doc.buffer, doc.crlf)) {
                 ++skipped;
                 continue;
             }
