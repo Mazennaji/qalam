@@ -21,22 +21,40 @@ struct Ed {
         e.setText(text);
     }
 
-    Ed &feed(const std::string &keys) {
-        std::string spaced;
-        for (char c: keys) {
-            if (c == ' ') {
-                spaced += "<Space>";
-            } else {
-                spaced += c;
-            }
-        }
-
+    void sendNotation(const std::string &chunk) {
+        if (chunk.empty()) return;
         std::string error;
-        const auto parsed = qalam::parseKeys(spaced, error);
+        const auto parsed = qalam::parseKeys(chunk, error);
         CHECK(parsed.has_value());
         if (parsed) {
             for (const qalam::Key &key: *parsed) e.handleKey(key);
         }
+    }
+
+    Ed &feed(const std::string &keys) {
+        std::string chunk;
+        std::size_t i = 0;
+        while (i < keys.size()) {
+            const auto byte = static_cast<unsigned char>(keys[i]);
+            if (byte >= 128) {
+                sendNotation(chunk);
+                chunk.clear();
+                const std::size_t length = qalam::charLength(keys, i);
+                qalam::Key key;
+                key.type = qalam::KeyType::Text;
+                key.text = keys.substr(i, length);
+                e.handleKey(key);
+                i += length;
+            } else {
+                if (keys[i] == ' ') {
+                    chunk += "<Space>";
+                } else {
+                    chunk += keys[i];
+                }
+                ++i;
+            }
+        }
+        sendNotation(chunk);
         return *this;
     }
 
