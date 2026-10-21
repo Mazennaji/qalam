@@ -515,6 +515,45 @@ namespace qalam {
         return quit_;
     }
 
+    void Editor::setText(const std::string &text) {
+        const std::size_t last = buffer_->lineCount() - 1;
+        static_cast<void>(buffer_->replace({0, 0}, {last, buffer_->line(last).size()}, text));
+        history_.clear();
+        marks_.clear();
+        jumps_.clear();
+        jumpIdx_ = 0;
+        mode_ = Mode::Normal;
+        row_ = 0;
+        col_ = 0;
+        wantedCol_ = 0;
+        rowOff_ = 0;
+        colOff_ = 0;
+        lastChange_.clear();
+        cmdKeys_.clear();
+        changed_ = false;
+        tainted_ = false;
+        resetPending();
+        syntax_.invalidate(0);
+        scroll();
+    }
+
+    std::string Editor::bufferText() const {
+        const std::size_t last = buffer_->lineCount() - 1;
+        return buffer_->text({0, 0}, {last, buffer_->line(last).size()});
+    }
+
+    Pos Editor::cursor() const {
+        return {row_, col_};
+    }
+
+    Mode Editor::mode() const {
+        return mode_;
+    }
+
+    const std::string &Editor::message() const {
+        return message_;
+    }
+
     ViewState Editor::view() const {
         ViewState v;
 
