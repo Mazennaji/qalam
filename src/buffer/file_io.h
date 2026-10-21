@@ -7,16 +7,16 @@
 #include "buffer/text_buffer.h"
 
 namespace qalam {
-
     enum class LoadStatus { Loaded, NotFound, Failed };
 
     struct LoadResult {
-        LoadStatus status;
-        std::size_t bytes;
+        LoadStatus status = LoadStatus::Failed;
+        std::size_t bytes = 0;
+        bool crlf = false;
     };
 
-    LoadResult loadFile(const std::string& path, TextBuffer& buffer);
+    LoadResult loadFile(const std::string &path, TextBuffer &buffer);
 
-    std::optional<std::size_t> saveFile(const std::string& path, const TextBuffer& buffer);
-
+    std::optional<std::size_t> saveFile(const std::string &path, const TextBuffer &buffer,
+                                        bool crlf = false);
 }
