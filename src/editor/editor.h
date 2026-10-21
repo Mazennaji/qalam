@@ -87,6 +87,7 @@ namespace qalam {
             std::vector<Pos> jumps;
             std::size_t jumpIdx = 0;
             std::string filetype;
+            bool crlf = false;
         };
 
         struct Window {
@@ -399,6 +400,7 @@ namespace qalam {
         std::string configPath_;
         std::string historyPath_;
         std::string filetype_;
+        bool crlf_ = false;
         std::string path_;
         std::string message_;
         std::string commandText_;
