@@ -33,7 +33,8 @@ target_include_directories(qalam_core PUBLIC src)
 target_compile_features(qalam_core PUBLIC cxx_std_20)
 qalam_apply_flags(qalam_core)
 
-add_executable(qalam src/main.cpp)
+add_executable(qalam src/main.cpp
+        src/bench/bench.cpp)
 target_link_libraries(qalam PRIVATE qalam_core)
 qalam_apply_flags(qalam)
 
@@ -62,4 +63,11 @@ if (QALAM_BUILD_TESTS)
     qalam_apply_flags(qalam_tests)
 
     add_test(NAME unit COMMAND qalam_tests)
+endif ()
+
+option(QALAM_BUILD_BENCH "Build the benchmark" OFF)
+
+if (QALAM_BUILD_BENCH)
+    add_executable(qalam_bench bench/bench.cpp)
+    target_link_libraries(qalam_bench PRIVATE qalam_core)
 endif ()
