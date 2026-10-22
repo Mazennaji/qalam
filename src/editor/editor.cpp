@@ -404,9 +404,55 @@ namespace qalam {
     }
 
     void Editor::handleKey(const Key &key) {
+        if (key.type == KeyType::Paste) {
+            handlePaste(key.text);
+            return;
+        }
         mapPending_.push_back(key);
         mapTicks_ = 0;
         resolveMaps(false);
+    }
+
+    void Editor::handlePaste(const std::string &raw) {
+        mapPending_.clear();
+        mapTicks_ = 0;
+
+        std::string text;
+        text.reserve(raw.size());
+        for (std::size_t i = 0; i < raw.size(); ++i) {
+            if (raw[i] == '\r') {
+                if (i + 1 < raw.size() && raw[i + 1] == '\n') ++i;
+                text += '\n';
+            } else {
+                text += raw[i];
+            }
+        }
+        if (text.empty()) return;
+
+        switch (mode_) {
+            case Mode::Insert: {
+                const Pos start{row_, col_};
+                applyEdit(start, start, text);
+                const Pos end = endOf(start, text);
+                row_ = end.row;
+                col_ = end.col;
+                rememberColumn();
+                tainted_ = true;
+                break;
+            }
+            case Mode::Command:
+            case Mode::Search: {
+                std::replace(text.begin(), text.end(), '\n', ' ');
+                insertPrompt(text);
+                if (mode_ == Mode::Search) previewSearch();
+                break;
+            }
+            case Mode::Normal:
+            case Mode::Visual:
+                message_ = "Paste ignored: press i first, or use \"+p";
+                break;
+        }
+        scroll();
     }
 
     bool Editor::idle() {
