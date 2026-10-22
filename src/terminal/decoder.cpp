@@ -1,5 +1,7 @@
 #include "terminal/decoder.h"
 
+#include <utility>
+
 namespace qalam {
     namespace {
         Decoded done(Key key, std::size_t used) {
@@ -61,6 +63,25 @@ namespace qalam {
                 case 6: return KeyType::PageDown;
                 default: return KeyType::None;
             }
+        }
+
+        Decoded decodePaste(const std::string &buf, bool final) {
+            static const std::string begin = "\x1b[200~";
+            static const std::string end = "\x1b[201~";
+
+            const std::size_t close = buf.find(end, begin.size());
+            if (close == std::string::npos) {
+                if (!final && buf.size() < (std::size_t{1} << 24)) return more();
+                Key key;
+                key.type = KeyType::Paste;
+                key.text = buf.substr(begin.size());
+                return done(std::move(key), buf.size());
+            }
+
+            Key key;
+            key.type = KeyType::Paste;
+            key.text = buf.substr(begin.size(), close - begin.size());
+            return done(std::move(key), close + end.size());
         }
 
         Decoded decodeEscape(const std::string &buf, bool final) {
@@ -139,24 +160,5 @@ namespace qalam {
         if (b >= 0x80) return decodeUtf8(bytes, final);
 
         return done(plain(KeyType::None), 1);
-    }
-
-    Decoded decodePaste(const std::string &buf, bool final) {
-        static const std::string begin = "\x1b[200~";
-        static const std::string end = "\x1b[201~";
-
-        const std::size_t close = buf.find(end, begin.size());
-        if (close == std::string::npos) {
-            if (!final && buf.size() < (std::size_t{1} << 24)) return more();
-            Key key;
-            key.type = KeyType::Paste;
-            key.text = buf.substr(begin.size());
-            return done(std::move(key), buf.size());
-        }
-
-        Key key;
-        key.type = KeyType::Paste;
-        key.text = buf.substr(begin.size(), close - begin.size());
-        return done(std::move(key), close + end.size());
     }
 }
