@@ -1,45 +1,19 @@
 #pragma once
 
+#include <string>
 #include <termios.h>
 
-#include <optional>
-#include <string>
-#include <utility>
-
 namespace qalam {
-
-    class RawMode {
-    public:
-        RawMode();
-        ~RawMode();
-
-        RawMode(const RawMode&) = delete;
-        RawMode& operator=(const RawMode&) = delete;
-
-    private:
-        termios orig_{};
-    };
-
-    class AlternateScreen {
-    public:
-        AlternateScreen();
-        ~AlternateScreen();
-
-        AlternateScreen(const AlternateScreen&) = delete;
-        AlternateScreen& operator=(const AlternateScreen&) = delete;
-    };
-
-    std::optional<unsigned char> readByte();
-
     enum class KeyType {
         None,
         Char,
         Text,
         Ctrl,
+        Escape,
         Enter,
         Tab,
         Backspace,
-        Escape,
+        Delete,
         Up,
         Down,
         Left,
@@ -48,31 +22,50 @@ namespace qalam {
         End,
         PageUp,
         PageDown,
-        Delete,
-        Unknown,
+        Paste
     };
 
     struct Key {
-        KeyType type;
-        char ch;
+        KeyType type = KeyType::None;
+        char ch = 0;
         std::string text;
+    };
 
-        Key(KeyType t = KeyType::None, char c = 0, std::string s = {})
-            : type(t), ch(c), text(std::move(s)) {}
+    struct Size {
+        int rows = 24;
+        int cols = 80;
+
+        bool operator==(const Size &) const = default;
+    };
+
+    class RawMode {
+    public:
+        RawMode();
+
+        ~RawMode();
+
+        RawMode(const RawMode &) = delete;
+
+        RawMode &operator=(const RawMode &) = delete;
+
+    private:
+        termios original_{};
+    };
+
+    class AlternateScreen {
+    public:
+        AlternateScreen();
+
+        ~AlternateScreen();
+
+        AlternateScreen(const AlternateScreen &) = delete;
+
+        AlternateScreen &operator=(const AlternateScreen &) = delete;
     };
 
     Key readKey();
 
-    std::string keyName(const Key& key);
-
-    struct Size {
-        int rows;
-        int cols;
-        bool operator==(const Size&) const = default;
-    };
-
     Size windowSize();
 
-    void writeAll(const std::string& s);
-
+    void writeAll(const std::string &data);
 }
