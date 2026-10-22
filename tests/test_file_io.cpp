@@ -24,10 +24,6 @@ namespace {
         std::ifstream in(path, std::ios::binary);
         return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     }
-
-    std::string joined(const LineBuffer &b) {
-        return b.text({0, 0}, {b.lineCount() - 1, b.line(b.lineCount() - 1).size()});
-    }
 }
 
 TEST(io_missing_file_is_not_found) {

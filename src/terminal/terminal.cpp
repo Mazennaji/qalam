@@ -89,4 +89,28 @@ namespace qalam {
             done += static_cast<std::size_t>(n);
         }
     }
+
+    std::string keyName(const Key& key) {
+        switch (key.type) {
+            case KeyType::Escape: return "Esc";
+            case KeyType::Enter: return "CR";
+            case KeyType::Tab: return "Tab";
+            case KeyType::Backspace: return "BS";
+            case KeyType::Delete: return "Del";
+            case KeyType::Up: return "Up";
+            case KeyType::Down: return "Down";
+            case KeyType::Left: return "Left";
+            case KeyType::Right: return "Right";
+            case KeyType::Home: return "Home";
+            case KeyType::End: return "End";
+            case KeyType::PageUp: return "PageUp";
+            case KeyType::PageDown: return "PageDown";
+            case KeyType::Paste: return "Paste";
+            case KeyType::Ctrl: return std::string("C-") + key.ch;
+            case KeyType::Char: return std::string(1, key.ch);
+            case KeyType::Text: return key.text;
+            case KeyType::None: return "None";
+        }
+        return "";
+    }
 }

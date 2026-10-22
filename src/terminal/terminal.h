@@ -2,6 +2,7 @@
 
 #include <string>
 #include <termios.h>
+#include <utility>
 
 namespace qalam {
     enum class KeyType {
@@ -38,6 +39,15 @@ namespace qalam {
         bool operator==(const Size &) const = default;
     };
 
+    struct Key {
+        KeyType type = KeyType::None;
+        char ch = 0;
+        std::string text;
+
+        Key() = default;
+        Key(KeyType t, char c = 0, std::string s = {}) : type(t), ch(c), text(std::move(s)) {}
+    };
+
     class RawMode {
     public:
         RawMode();
@@ -68,4 +78,6 @@ namespace qalam {
     Size windowSize();
 
     void writeAll(const std::string &data);
+
+    std::string keyName(const Key& key);
 }
