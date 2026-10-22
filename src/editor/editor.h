@@ -43,6 +43,8 @@ namespace qalam {
 
         void handleKey(const Key &key);
 
+        void handlePaste(const std::string &raw);
+
         bool idle();
 
         bool shouldQuit() const;
