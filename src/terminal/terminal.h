@@ -42,15 +42,6 @@ namespace qalam {
         bool operator==(const Size &) const = default;
     };
 
-    struct Key {
-        KeyType type = KeyType::None;
-        char ch = 0;
-        std::string text;
-
-        Key() = default;
-        Key(KeyType t, char c = 0, std::string s = {}) : type(t), ch(c), text(std::move(s)) {}
-    };
-
     class RawMode {
     public:
         RawMode();
