@@ -34,7 +34,7 @@ target_compile_features(qalam_core PUBLIC cxx_std_20)
 qalam_apply_flags(qalam_core)
 
 add_executable(qalam src/main.cpp
-        src/bench/bench.cpp)
+        bench/bench.cpp)
 target_link_libraries(qalam PRIVATE qalam_core)
 qalam_apply_flags(qalam)
 
