@@ -2451,12 +2451,14 @@ namespace qalam {
 
     void Editor::undo(int count) {
         std::optional<Pos> where;
+        std::size_t low = kEnd;
         for (int i = 0; i < count; ++i) {
             const std::optional<Pos> next = history_.undo(*buffer_);
             if (!next) break;
             where = next;
+            low = std::min(low, history_.touchedRow());
         }
-        syntax_.invalidate(0);
+        if (low != kEnd) syntax_.invalidate(low);
         if (where) {
             placeCursor(*where);
         } else {
@@ -2466,12 +2468,14 @@ namespace qalam {
 
     void Editor::redo(int count) {
         std::optional<Pos> where;
+        std::size_t low = kEnd;
         for (int i = 0; i < count; ++i) {
             const std::optional<Pos> next = history_.redo(*buffer_);
             if (!next) break;
             where = next;
+            low = std::min(low, history_.touchedRow());
         }
-        syntax_.invalidate(0);
+        if (low != kEnd) syntax_.invalidate(low);
         if (where) {
             placeCursor(*where);
         } else {
