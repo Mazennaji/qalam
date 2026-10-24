@@ -468,6 +468,7 @@ namespace qalam {
         bool historyOn_ = true;
         std::vector<std::size_t> tracked_;
         int batch_ = 0;
+        std::size_t trackedFrom_ = 0;
         std::vector<std::string> cmdHist_;
         std::vector<std::string> searchHist_;
         std::vector<std::string> complCands_;

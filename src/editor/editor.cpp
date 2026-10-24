@@ -3186,10 +3186,13 @@ namespace qalam {
 
         const std::size_t removed = end.row - start.row;
         const std::size_t added = endOf(start, text).row - start.row;
+        if (removed == 0 && added == 0) return;
+
         const bool wholeLines = removed > 0 && start.col == 0 && end.col == 0 && text.empty();
         const bool pushDown = removed == 0 && start.col == 0 && !text.empty() && text.back() == '\n';
 
-        for (std::size_t &r: tracked_) {
+        for (std::size_t i = trackedFrom_; i < tracked_.size(); ++i) {
+            std::size_t &r = tracked_[i];
             if (r == kEnd) continue;
             if (wholeLines) {
                 if (r >= end.row) {
@@ -3263,12 +3266,16 @@ namespace qalam {
         const bool own = tracked_.empty() && first < last;
         if (own) {
             for (std::size_t r = first; r <= last; ++r) tracked_.push_back(r);
+            trackedFrom_ = 0;
             ++batch_;
             for (std::size_t i = 0; i < tracked_.size() && !quit_; ++i) {
-                if (tracked_[i] != kEnd) runAt(tracked_[i]);
+                const std::size_t r = tracked_[i];
+                trackedFrom_ = i + 1;
+                if (r != kEnd) runAt(r);
             }
             --batch_;
             tracked_.clear();
+            trackedFrom_ = 0;
         } else {
             for (std::size_t r = first; r <= last && !quit_; ++r) runAt(r);
         }
@@ -3317,10 +3324,12 @@ namespace qalam {
         }
 
         tracked_ = rows;
+        trackedFrom_ = 0;
         ++batch_;
         std::size_t ran = 0;
         for (std::size_t i = 0; i < tracked_.size() && !quit_; ++i) {
             const std::size_t r = tracked_[i];
+            trackedFrom_ = i + 1;
             if (r == kEnd || r >= buffer_->lineCount()) continue;
             row_ = r;
             col_ = 0;
@@ -3331,6 +3340,7 @@ namespace qalam {
         }
         --batch_;
         tracked_.clear();
+        trackedFrom_ = 0;
         placeCursor({row_, col_});
 
         if (message_.rfind("Not an editor command", 0) != 0) {
