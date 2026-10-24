@@ -20,6 +20,7 @@ namespace qalam {
 
         void markSaved();
         bool modified() const;
+        std::size_t touchedRow() const;
         void clear();
 
     private:
@@ -29,6 +30,7 @@ namespace qalam {
         std::vector<Group> redo_;
         Group open_;
         std::size_t savePoint_ = 0;
+        std::size_t touched_ = 0;
     };
 
 }
