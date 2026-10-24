@@ -57,7 +57,8 @@ if (QALAM_BUILD_TESTS)
             tests/test_render.cpp
             tests/test_file_io.cpp
             tests/test_decoder.cpp
-            tests/test_paste.cpp)
+            tests/test_paste.cpp
+            tests/test_line_buffer.cpp)
     target_include_directories(qalam_tests PRIVATE tests)
     target_link_libraries(qalam_tests PRIVATE qalam_core)
     qalam_apply_flags(qalam_tests)
