@@ -100,7 +100,8 @@ TEST(linebuffer_random_edits_match_a_plain_string_model) {
 
         const std::string &ins = inserts[next() % inserts.size()];
         const Edit edit = b.replace({r1, c1}, {r2, c2}, ins);
-        CHECK_EQ(edit.removed, m.doc.substr(m.offset({r1, c1}), m.offset({r2, c2}) - m.offset({r1, c1})));
+        CHECK_EQ(edit.removed,
+                 m.doc.substr(m.offset({r1, c1}), m.offset({r2, c2}) - m.offset({r1, c1})));
         m.replace({r1, c1}, {r2, c2}, ins);
 
         CHECK_EQ(b.lineCount(), m.lines().size());
@@ -121,9 +122,12 @@ TEST(linebuffer_large_insert_and_cross_chunk_delete) {
     CHECK_EQ(b.line(54321), std::string("line 54321"));
 
     b.replace({10, 2}, {99990, 3}, "");
-    CHECK_EQ(b.lineCount(), std::size_t{10});
-    CHECK_EQ(b.line(10 - 1), std::string("line 9"));
+    CHECK_EQ(b.lineCount(), std::size_t{20});
     CHECK_EQ(b.line(0), std::string("line 0"));
+    CHECK_EQ(b.line(9), std::string("line 9"));
+    CHECK_EQ(b.line(10), std::string("lie 99990"));
+    CHECK_EQ(b.line(11), std::string("line 99991"));
+    CHECK_EQ(b.line(19), std::string("line 99999"));
 }
 
 TEST(linebuffer_delete_everything_leaves_one_empty_line) {
