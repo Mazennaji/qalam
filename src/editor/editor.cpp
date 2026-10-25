@@ -16,6 +16,7 @@
 #include "input/key_notation.h"
 #include "search/substitute.h"
 #include "text/columns.h"
+#include "finder/fuzzy.h"
 
 namespace qalam {
     namespace {
@@ -1571,6 +1572,10 @@ namespace qalam {
             } else {
                 message_ = "usage: :syntax on|off";
             }
+        } else if (name == "find" || name == "fin") {
+            findCommand(argument);
+        } else if (name == "fb") {
+            findBufferCommand(argument);
         } else if (name == "reload") {
             message_.clear();
             const bool found = useConfig(configPath_);
@@ -3703,6 +3708,59 @@ namespace qalam {
         placeCursor({after + 1, firstNonBlank(*buffer_, {after + 1, 0}).target.col});
         message_ = std::to_string(count) + (count == 1 ? " line" : " lines") + " read from \"" +
                    path + "\"";
+    }
+
+    void Editor::findCommand(const std::string &query) {
+        if (query.empty()) {
+            message_ = "usage: :find QUERY";
+            return;
+        }
+
+        const std::vector<std::string> files = listFiles(".", 20000);
+        const std::vector<std::string> hits = rankFuzzy(query, files, 5);
+        if (hits.empty()) {
+            message_ = "No file matches: " + query;
+            return;
+        }
+
+        const std::string best = hits.front();
+        edit(best);
+
+        if (hits.size() > 1 && path_ == best) {
+            std::string more = " (also:";
+            for (std::size_t i = 1; i < hits.size(); ++i) more += " " + hits[i];
+            message_ += more + ")";
+        }
+    }
+
+    void Editor::findBufferCommand(const std::string &query) {
+        if (query.empty()) {
+            message_ = "usage: :fb QUERY";
+            return;
+        }
+
+        std::vector<std::string> names;
+        std::vector<std::size_t> owners;
+        for (std::size_t i = 0; i < docs_.size(); ++i) {
+            const std::string name = docPath(i);
+            if (name.empty()) continue;
+            names.push_back(name);
+            owners.push_back(i);
+        }
+
+        const std::vector<std::string> hits = rankFuzzy(query, names, 1);
+        if (hits.empty()) {
+            message_ = "No buffer matches: " + query;
+            return;
+        }
+
+        for (std::size_t k = 0; k < names.size(); ++k) {
+            if (names[k] == hits.front()) {
+                switchBuffer(owners[k]);
+                message_ = bufferInfo();
+                return;
+            }
+        }
     }
 
     void Editor::mapCommand(const std::string &argument, bool remove) {

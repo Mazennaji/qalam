@@ -386,6 +386,10 @@ namespace qalam {
 
         void refreshSyntax();
 
+        void findCommand(const std::string &query);
+
+        void findBufferCommand(const std::string &query);
+
         std::unique_ptr<TextBuffer> buffer_;
         UndoHistory history_;
         std::vector<Doc> docs_;
