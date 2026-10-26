@@ -27,7 +27,9 @@ function(qalam_apply_flags target)
     endif ()
 endfunction()
 
-add_library(qalam_core STATIC ${QALAM_SOURCES})
+add_library(qalam_core STATIC ${QALAM_SOURCES}
+        src/text/bidi.cpp
+        src/text/bidi.h)
 target_include_directories(qalam_core PUBLIC src)
 target_compile_features(qalam_core PUBLIC cxx_std_20)
 qalam_apply_flags(qalam_core)
@@ -55,7 +57,9 @@ if (QALAM_BUILD_TESTS)
             tests/test_render.cpp
             tests/test_file_io.cpp
             tests/test_decoder.cpp
-            tests/test_paste.cpp)
+            tests/test_paste.cpp
+            tests/test_arabic.cpp
+            tests/test_bidi.cpp)
     target_include_directories(qalam_tests PRIVATE tests)
     target_link_libraries(qalam_tests PRIVATE qalam_core)
     qalam_apply_flags(qalam_tests)
