@@ -110,19 +110,31 @@ namespace qalam {
         const int base = rtlPara ? 1 : 0;
         const int paraDir = rtlPara ? 1 : 0;
 
-        auto strongDir = [](Cls c) { return c == Cls::L ? 0 : 1; };
+        std::vector<int> eff(n, -1);
+        int lastStrong = paraDir;
+        for (std::size_t i = 0; i < n; ++i) {
+            if (units[i].cls == Cls::L) {
+                lastStrong = 0;
+                eff[i] = 0;
+            } else if (units[i].cls == Cls::R) {
+                lastStrong = 1;
+                eff[i] = 1;
+            } else if (units[i].cls == Cls::Digit) {
+                eff[i] = lastStrong;
+            }
+        }
 
         std::vector<int> left(n, paraDir);
         std::vector<int> right(n, paraDir);
         int last = paraDir;
         for (std::size_t i = 0; i < n; ++i) {
             left[i] = last;
-            if (units[i].cls != Cls::Neutral) last = strongDir(units[i].cls);
+            if (eff[i] != -1) last = eff[i];
         }
         last = paraDir;
         for (std::size_t i = n; i-- > 0;) {
             right[i] = last;
-            if (units[i].cls != Cls::Neutral) last = strongDir(units[i].cls);
+            if (eff[i] != -1) last = eff[i];
         }
 
         std::vector<int> level(n, 0);
