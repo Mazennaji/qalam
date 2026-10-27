@@ -17,6 +17,7 @@
 #include "search/substitute.h"
 #include "text/columns.h"
 #include "finder/fuzzy.h"
+#include "text/bidi.h"
 
 namespace qalam {
     namespace {
@@ -139,10 +140,20 @@ namespace qalam {
             int cursorCol = 0;
         };
 
+        int visualColumn(const std::string& line, std::size_t col, bool bidi) {
+            const int logical = displayColumn(line, col);
+            if (!bidi) return logical;
+            const std::vector<std::size_t> order = visualCellOrder(line);
+            for (std::size_t v = 0; v < order.size(); ++v) {
+                if (order[v] == static_cast<std::size_t>(logical)) return static_cast<int>(v);
+            }
+            return logical;
+        }
+
         ViewPlace placeInView(const TextBuffer &text, std::size_t row, std::size_t col,
-                              std::size_t rowOff, int colOff, int rows, int width, bool wrap) {
+                              std::size_t rowOff, int colOff, int rows, int width, bool wrap, bool bidi) {
             const std::string &line = text.line(row);
-            const int column = displayColumn(line, col);
+            const int column = visualColumn(line, col,bidi);
             if (rowOff > row) rowOff = row;
 
             if (wrap) {
@@ -352,6 +363,7 @@ namespace qalam {
         number_ = config.number;
         relative_ = config.relativeNumber;
         wrap_ = config.wrap;
+        bidi_ = config.bidi;
         setTabStop(config.tabstop);
         shiftwidth_ = config.shiftwidth;
         expandtab_ = config.expandtab;
@@ -669,6 +681,7 @@ namespace qalam {
             w.number = number_;
             w.relative = relative_;
             w.wrap = wrap_;
+            w.bidi = bidi_;
             const int rows = std::max(1, p.rect.rows - 1);
             const bool numbers = number_ || relative_;
 
@@ -3997,7 +4010,9 @@ namespace qalam {
             target = &relative_;
         } else if (name == "wrap") {
             target = &wrap_;
-        } else if (name == "expandtab" || name == "et") {
+        } else if (name == "bidi") {
+            target = &bidi_;
+        }else if (name == "expandtab" || name == "et") {
             target = &expandtab_;
         } else if (name == "autoindent" || name == "ai") {
             target = &autoindent_;
@@ -4024,6 +4039,7 @@ namespace qalam {
         text += " ts=" + std::to_string(tabStop());
         text += " sw=" + std::to_string(shiftWidth());
         text += " ft=" + syntax_.languageName();
+        text += bidi_ ? " bidi" : " nobidi";
         return text;
     }
 
