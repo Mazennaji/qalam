@@ -34,6 +34,7 @@ namespace qalam {
         bool number = false;
         bool relative = false;
         bool wrap = false;
+        bool bidi = false;
         std::optional<Selection> selection;
         std::size_t rowOffset = 0;
         int colOffset = 0;
