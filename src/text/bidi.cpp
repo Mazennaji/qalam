@@ -1,4 +1,5 @@
 #include "text/bidi.h"
+#include "text/columns.h"
 
 #include <algorithm>
 
@@ -211,5 +212,52 @@ namespace qalam {
             i = j + 1;
         }
         return runs;
+    }
+
+    std::vector<std::size_t> visualCellOrder(const std::string &line) {
+        const bool ascii = std::all_of(line.begin(), line.end(), [](char c) {
+            return static_cast<unsigned char>(c) < 0x80;
+        });
+        if (ascii) return {};
+
+        const std::vector<std::string> cells = displayCells(line);
+        const std::vector<std::size_t> sources = cellSources(line);
+        if (cells.empty() || cells.size() != sources.size()) return {};
+
+        struct Cluster {
+            std::size_t first;
+            std::size_t count;
+            std::size_t source;
+        };
+        std::vector<Cluster> clusters;
+        for (std::size_t i = 0; i < cells.size(); ++i) {
+            if (!cells[i].empty() || clusters.empty()) {
+                clusters.push_back({i, 1, sources[i]});
+            } else {
+                ++clusters.back().count;
+            }
+        }
+
+        std::vector<std::size_t> order;
+        order.reserve(cells.size());
+        for (const VisualRun &run: visualRuns(line)) {
+            const auto lo = std::lower_bound(
+                clusters.begin(), clusters.end(), run.begin,
+                [](const Cluster &c, std::size_t byte) { return c.source < byte; });
+            auto hi = lo;
+            while (hi != clusters.end() && hi->source < run.end) ++hi;
+
+            auto emit = [&](const Cluster &c) {
+                for (std::size_t k = 0; k < c.count; ++k) order.push_back(c.first + k);
+            };
+            if (run.rtl) {
+                for (auto it = hi; it != lo;) emit(*--it);
+            } else {
+                for (auto it = lo; it != hi; ++it) emit(*it);
+            }
+        }
+
+        if (order.size() != cells.size()) return {};
+        return order;
     }
 }
