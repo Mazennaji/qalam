@@ -466,6 +466,7 @@ namespace qalam {
         bool number_ = false;
         bool relative_ = false;
         bool wrap_ = false;
+        bool bidi_ = false;
         int shiftwidth_ = 0;
         bool expandtab_ = false;
         bool autoindent_ = false;
