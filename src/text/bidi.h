@@ -12,4 +12,5 @@ namespace qalam {
     };
 
     std::vector<VisualRun> visualRuns(const std::string &line);
+    std::vector<std::size_t> visualCellOrder(const std::string& line);
 }
