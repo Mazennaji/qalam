@@ -709,7 +709,7 @@ namespace qalam {
 
                 const int g = gutterWidth(numbers, buffer_->lineCount(), p.rect.cols);
                 const ViewPlace s = placeInView(*buffer_, row_, col_, rowOff_, colOff_, rows,
-                                                std::max(1, p.rect.cols - g), wrap_);
+                                std::max(1, p.rect.cols - g), wrap_, bidi_);
                 w.rowOffset = s.rowOff;
                 w.colOffset = s.colOff;
                 w.line = row_;
@@ -732,7 +732,7 @@ namespace qalam {
 
                 const int g = gutterWidth(numbers, text.lineCount(), p.rect.cols);
                 const ViewPlace s = placeInView(text, r, c, win.rowOff, win.colOff, rows,
-                                                std::max(1, p.rect.cols - g), wrap_);
+                                std::max(1, p.rect.cols - g), wrap_, bidi_);
                 w.rowOffset = s.rowOff;
                 w.colOffset = s.colOff;
                 w.line = r;
@@ -3939,7 +3939,7 @@ namespace qalam {
 
     void Editor::scroll() {
         const ViewPlace s = placeInView(*buffer_, row_, col_, rowOff_, colOff_,
-                                        static_cast<int>(textRows()), textWidth(), wrap_);
+                                static_cast<int>(textRows()), textWidth(), wrap_, bidi_);
         rowOff_ = s.rowOff;
         colOff_ = s.colOff;
     }
