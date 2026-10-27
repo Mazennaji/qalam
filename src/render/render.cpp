@@ -1,4 +1,5 @@
 #include "render/render.h"
+#include "text/bidi.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -67,8 +68,12 @@ namespace qalam {
         std::size_t appendTextRow(std::string &out, const std::string &line, std::size_t row,
                                   int colOffset, int cols, const std::string &pattern,
                                   const std::optional<Selection> &selection, const Syntax *syntax,
-                                  const std::vector<Kind> *kinds) {
+                                  const std::vector<Kind> *kinds,
+                                  bool bidi) {
             const std::vector<std::string> cells = displayCells(line);
+            const std::vector<std::size_t> order =
+                    bidi ? visualCellOrder(line) : std::vector<std::size_t>{};
+            auto at = [&](std::size_t v) { return order.empty() ? v : order[v]; };
 
             const bool selected = selection && row >= selection->start.row && row <= selection->end.row;
             if (cells.empty()) {
@@ -116,7 +121,8 @@ namespace qalam {
             if (kinds != nullptr && syntax != nullptr) sources = cellSources(line);
 
             int current = 0;
-            for (std::size_t i = start; i < end; ++i) {
+            for (std::size_t v = start; v < end; ++v) {
+                const std::size_t i = at(v);
                 int want = 0;
                 if (i >= selFrom && i < selTo) {
                     want = 2;
@@ -141,10 +147,10 @@ namespace qalam {
 
                 const std::string &glyph = cells[i];
                 if (glyph.empty()) {
-                    if (i == start) out += ' ';
+                    if (v == start) out += ' ';
                     continue;
                 }
-                const bool cut = i + 1 == end && i + 1 < cells.size() && cells[i + 1].empty();
+                const bool cut = v + 1 == end && v + 1 < cells.size() && cells[at(v + 1)].empty();
                 out += cut ? std::string(" ") : glyph;
             }
             if (current != 0) out += "\x1b[m";
@@ -211,9 +217,8 @@ namespace qalam {
                     }
 
                     const int offset = w.wrap ? seg * textCols : w.colOffset;
-                    const std::size_t used =
-                            appendTextRow(out, line, row, offset, textCols, view.searchPattern,
-                                          w.selection, w.syntax, kinds);
+                    const std::size_t used = appendTextRow(out, line, row, offset, textCols, view.searchPattern,
+                                                           w.selection, w.syntax, kinds, w.bidi);
                     if (used < width) out.append(width - used, ' ');
                 }
                 ++row;
