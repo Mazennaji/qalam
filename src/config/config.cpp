@@ -125,7 +125,9 @@ namespace qalam {
                     config.relativeNumber = value;
                 } else if (name == "wrap") {
                     config.wrap = value;
-                } else if (name == "expandtab" || name == "et") {
+                }else if (name == "bidi") {
+                    config.bidi = value;
+                }else if (name == "expandtab" || name == "et") {
                     config.expandtab = value;
                 } else if (name == "autoindent" || name == "ai") {
                     config.autoindent = value;
