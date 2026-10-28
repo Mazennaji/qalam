@@ -77,10 +77,23 @@ TEST(bidi_arrow_keys_follow_screen_direction) {
 TEST(bidi_wide_and_tab_cells_do_not_stall_movement) {
     Ed ed("\xd9\x82\t\xe6\x97\xa5x");
     ed.feed(":set bidi<CR>");
+
     const std::size_t start = ed.col();
     ed.feed("l");
+    CHECK_EQ(ed.col(), start);
+
+    ed.feed("h");
     CHECK(ed.col() != start);
-    for (int i = 0; i < 20; ++i) ed.feed("l");
+    const std::size_t afterTab = ed.col();
+    ed.feed("h");
+    CHECK(ed.col() != afterTab);
+
     for (int i = 0; i < 20; ++i) ed.feed("h");
+    const std::size_t leftEdge = ed.col();
+    ed.feed("h");
+    CHECK_EQ(ed.col(), leftEdge);
+
+    for (int i = 0; i < 20; ++i) ed.feed("l");
+    CHECK_EQ(ed.col(), start);
     CHECK(ed.e.mode() == qalam::Mode::Normal);
 }
