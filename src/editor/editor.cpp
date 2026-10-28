@@ -140,7 +140,7 @@ namespace qalam {
             int cursorCol = 0;
         };
 
-        int visualColumn(const std::string& line, std::size_t col, bool bidi) {
+        int visualColumn(const std::string &line, std::size_t col, bool bidi) {
             const int logical = displayColumn(line, col);
             if (!bidi) return logical;
             const std::vector<std::size_t> order = visualCellOrder(line);
@@ -153,7 +153,7 @@ namespace qalam {
         ViewPlace placeInView(const TextBuffer &text, std::size_t row, std::size_t col,
                               std::size_t rowOff, int colOff, int rows, int width, bool wrap, bool bidi) {
             const std::string &line = text.line(row);
-            const int column = visualColumn(line, col,bidi);
+            const int column = visualColumn(line, col, bidi);
             if (rowOff > row) rowOff = row;
 
             if (wrap) {
@@ -709,7 +709,7 @@ namespace qalam {
 
                 const int g = gutterWidth(numbers, buffer_->lineCount(), p.rect.cols);
                 const ViewPlace s = placeInView(*buffer_, row_, col_, rowOff_, colOff_, rows,
-                                std::max(1, p.rect.cols - g), wrap_, bidi_);
+                                                std::max(1, p.rect.cols - g), wrap_, bidi_);
                 w.rowOffset = s.rowOff;
                 w.colOffset = s.colOff;
                 w.line = row_;
@@ -732,7 +732,7 @@ namespace qalam {
 
                 const int g = gutterWidth(numbers, text.lineCount(), p.rect.cols);
                 const ViewPlace s = placeInView(text, r, c, win.rowOff, win.colOff, rows,
-                                std::max(1, p.rect.cols - g), wrap_, bidi_);
+                                                std::max(1, p.rect.cols - g), wrap_, bidi_);
                 w.rowOffset = s.rowOff;
                 w.colOffset = s.colOff;
                 w.line = r;
@@ -3819,12 +3819,14 @@ namespace qalam {
     }
 
     void Editor::moveLeft(std::size_t n) {
+        if (bidi_ && moveVisual(-1, n)) return;
         const std::string &line = buffer_->line(row_);
         for (std::size_t i = 0; i < n && col_ > 0; ++i) col_ = prevCharStart(line, col_);
         rememberColumn();
     }
 
     void Editor::moveRight(std::size_t n) {
+        if (bidi_ && moveVisual(1, n)) return;
         const std::string &line = buffer_->line(row_);
         const std::size_t limit = maxColumn(row_);
         for (std::size_t i = 0; i < n; ++i) {
@@ -3833,6 +3835,49 @@ namespace qalam {
             col_ += length;
         }
         rememberColumn();
+    }
+
+    bool Editor::moveVisual(int direction, std::size_t count) {
+        const std::string &line = buffer_->line(row_);
+        const std::vector<std::size_t> order = visualCellOrder(line);
+        if (order.empty()) return false;
+
+        const auto cell = static_cast<std::size_t>(displayColumn(line, col_));
+        std::size_t v = order.size();
+        for (std::size_t k = 0; k < order.size(); ++k) {
+            if (order[k] == cell) {
+                v = k;
+                break;
+            }
+        }
+        if (v == order.size()) return false;
+
+        const std::size_t limit = maxColumn(row_);
+        for (std::size_t i = 0; i < count; ++i) {
+            const std::size_t here = byteForColumn(line, order[v]);
+            bool moved = false;
+            std::size_t w = v;
+            while (true) {
+                if (direction < 0) {
+                    if (w == 0) break;
+                    --w;
+                } else {
+                    if (w + 1 >= order.size()) break;
+                    ++w;
+                }
+                const std::size_t b = byteForColumn(line, order[w]);
+                if (b != here && b <= limit) {
+                    v = w;
+                    moved = true;
+                    break;
+                }
+            }
+            if (!moved) break;
+        }
+
+        col_ = snapToStart(line, byteForColumn(line, order[v]));
+        rememberColumn();
+        return true;
     }
 
     void Editor::moveUp(std::size_t n) {
@@ -3939,7 +3984,7 @@ namespace qalam {
 
     void Editor::scroll() {
         const ViewPlace s = placeInView(*buffer_, row_, col_, rowOff_, colOff_,
-                                static_cast<int>(textRows()), textWidth(), wrap_, bidi_);
+                                        static_cast<int>(textRows()), textWidth(), wrap_, bidi_);
         rowOff_ = s.rowOff;
         colOff_ = s.colOff;
     }
@@ -4012,7 +4057,7 @@ namespace qalam {
             target = &wrap_;
         } else if (name == "bidi") {
             target = &bidi_;
-        }else if (name == "expandtab" || name == "et") {
+        } else if (name == "expandtab" || name == "et") {
             target = &expandtab_;
         } else if (name == "autoindent" || name == "ai") {
             target = &autoindent_;
