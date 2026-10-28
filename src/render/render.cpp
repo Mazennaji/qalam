@@ -251,6 +251,22 @@ namespace qalam {
             }
         }
 
+        if (!view.overlay.empty()) {
+            const auto count = static_cast<int>(std::min<std::size_t>(
+                    view.overlay.size(), static_cast<std::size_t>(std::max(size.rows - 2, 0))));
+            const auto cols = static_cast<std::size_t>(std::max(size.cols, 0));
+            for (int i = 0; i < count; ++i) {
+                std::string text = truncateToWidth(" " + view.overlay[static_cast<std::size_t>(i)], cols);
+                const auto used = static_cast<std::size_t>(displayWidth(text));
+                if (used < cols) text.append(cols - used, ' ');
+
+                out += moveTo(size.rows - count + i, 1);
+                out += i == view.overlaySelected ? "\x1b[7m" : "\x1b[m";
+                out += text;
+                out += "\x1b[m";
+            }
+        }
+
         const auto w = static_cast<std::size_t>(std::max(size.cols, 0));
         const std::string msg = truncateToWidth(view.message, w);
         out += moveTo(size.rows, 1);
