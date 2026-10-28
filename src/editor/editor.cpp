@@ -201,6 +201,7 @@ namespace qalam {
                 case Mode::Visual: return MapMode::Visual;
                 case Mode::Command:
                 case Mode::Search: return std::nullopt;
+                case Mode::Picker: return std::nullopt;
             }
             return std::nullopt;
         }
@@ -478,6 +479,13 @@ namespace qalam {
             case Mode::Visual:
                 message_ = "Paste ignored: press i first, or use \"+p";
                 break;
+            case Mode::Picker: {
+                std::replace(text.begin(), text.end(), '\n', ' ');
+                pickQuery_ += text;
+                pickSel_ = 0;
+                refreshPicker();
+                break;
+            }
         }
         scroll();
     }
@@ -501,6 +509,7 @@ namespace qalam {
                        selReg_ == 0 && !pendingG_ && count_ == 0;
             case Mode::Command:
             case Mode::Search:
+            case Mode::Picker:
                 return false;
         }
         return false;
@@ -549,6 +558,9 @@ namespace qalam {
                 message_.clear();
                 handleNormalKey(key);
                 break;
+            case Mode::Picker:
+                handlePickerKey(key);
+                break;
         }
         if (hadRegister && selReg_ != 0 && !anyPending()) selReg_ = 0;
         if (mode_ != Mode::Insert && batch_ == 0) history_.close();
@@ -557,7 +569,7 @@ namespace qalam {
     }
 
     void Editor::trackRepeat() {
-        if (mode_ == Mode::Visual || mode_ == Mode::Command || mode_ == Mode::Search) {
+        if (mode_ == Mode::Visual || mode_ == Mode::Command || mode_ == Mode::Search || mode_ == Mode::Picker) {
             tainted_ = true;
             cmdKeys_.clear();
             return;
@@ -646,6 +658,9 @@ namespace qalam {
             case Mode::Visual:
                 modeName = visualKind_ == 'V' ? "V-LINE" : visualKind_ == 'B' ? "V-BLOCK" : "VISUAL";
                 break;
+            case Mode::Picker:
+                modeName = "PICK";
+                break;
         }
         if (recording_ != 0) modeName += std::string(" rec @") + recording_;
 
@@ -670,7 +685,25 @@ namespace qalam {
         }
         if (mode_ == Mode::Search) {
             v.searchPattern = searchText_;
-        } else if (highlight_) {
+        }
+        if (mode_ == Mode::Picker) {
+            const std::string prompt = (pickBuffers_ ? "buffer> " : "file> ") + pickQuery_;
+            v.commandLine = true;
+            v.message = prompt;
+            v.promptCursor = displayWidth(prompt);
+
+            const auto maxLines = static_cast<std::size_t>(std::max(1, size_.rows - 3));
+            if (pickHits_.empty()) {
+                v.overlay.push_back("(no matches)");
+            } else {
+                const std::size_t first = pickSel_ >= maxLines ? pickSel_ - maxLines + 1 : 0;
+                for (std::size_t i = first; i < pickHits_.size() && v.overlay.size() < maxLines; ++i) {
+                    v.overlay.push_back(pickHits_[i]);
+                }
+                v.overlaySelected = static_cast<int>(pickSel_ - first);
+            }
+        }
+        else if (highlight_) {
             v.searchPattern = lastSearch_;
         }
 
@@ -1605,6 +1638,10 @@ namespace qalam {
             findCommand(argument);
         } else if (name == "fb") {
             findBufferCommand(argument);
+        } else if (name == "pick") {
+            openPicker(false);
+        } else if (name == "pickb") {
+            openPicker(true);
         } else if (name == "reload") {
             message_.clear();
             const bool found = useConfig(configPath_);
@@ -3791,6 +3828,132 @@ namespace qalam {
             }
         }
     }
+
+    void Editor::openPicker(bool buffers) {
+        if (batch_ > 0 || replaying_) return;
+
+        pickItems_.clear();
+        if (buffers) {
+            for (std::size_t i = 0; i < docs_.size(); ++i) {
+                const std::string name = docPath(i);
+                if (!name.empty()) pickItems_.push_back(name);
+            }
+            if (pickItems_.empty()) {
+                message_ = "No named buffers";
+                return;
+            }
+        } else {
+            pickItems_ = listFiles(".", 20000);
+        }
+
+        pickBuffers_ = buffers;
+        pickQuery_.clear();
+        pickSel_ = 0;
+        resetPending();
+        mode_ = Mode::Picker;
+        refreshPicker();
+    }
+
+    void Editor::refreshPicker() {
+        pickHits_ = rankFuzzy(pickQuery_, pickItems_, 10);
+        if (pickHits_.empty()) {
+            pickSel_ = 0;
+        } else {
+            pickSel_ = std::min(pickSel_, pickHits_.size() - 1);
+        }
+    }
+
+    void Editor::closePicker() {
+        mode_ = Mode::Normal;
+        pickItems_.clear();
+        pickHits_.clear();
+        pickQuery_.clear();
+        pickSel_ = 0;
+    }
+
+    void Editor::acceptPicker() {
+        if (pickHits_.empty()) {
+            const std::string query = pickQuery_;
+            closePicker();
+            message_ = "No match: " + query;
+            return;
+        }
+
+        const std::string choice = pickHits_[pickSel_];
+        const bool buffers = pickBuffers_;
+        closePicker();
+
+        if (!buffers) {
+            edit(choice);
+            return;
+        }
+        for (std::size_t i = 0; i < docs_.size(); ++i) {
+            if (docPath(i) == choice) {
+                switchBuffer(i);
+                message_ = bufferInfo();
+                return;
+            }
+        }
+    }
+
+    void Editor::handlePickerKey(const Key& key) {
+        auto up = [&] {
+            if (pickSel_ > 0) --pickSel_;
+        };
+        auto down = [&] {
+            if (pickSel_ + 1 < pickHits_.size()) ++pickSel_;
+        };
+
+        switch (key.type) {
+            case KeyType::Escape:
+                closePicker();
+                break;
+            case KeyType::Enter:
+                acceptPicker();
+                break;
+            case KeyType::Up:
+                up();
+                break;
+            case KeyType::Down:
+                down();
+                break;
+            case KeyType::Ctrl:
+                if (key.ch == 'c') {
+                    closePicker();
+                } else if (key.ch == 'p') {
+                    up();
+                } else if (key.ch == 'n') {
+                    down();
+                } else if (key.ch == 'u') {
+                    pickQuery_.clear();
+                    pickSel_ = 0;
+                    refreshPicker();
+                }
+                break;
+            case KeyType::Backspace:
+                if (pickQuery_.empty()) {
+                    closePicker();
+                } else {
+                    popLastChar(pickQuery_);
+                    pickSel_ = 0;
+                    refreshPicker();
+                }
+                break;
+            case KeyType::Char:
+                pickQuery_ += key.ch;
+                pickSel_ = 0;
+                refreshPicker();
+                break;
+            case KeyType::Text:
+                pickQuery_ += key.text;
+                pickSel_ = 0;
+                refreshPicker();
+                break;
+            default:
+                break;
+        }
+    }
+
 
     void Editor::mapCommand(const std::string &argument, bool remove) {
         std::istringstream stream(argument);
