@@ -51,6 +51,8 @@ namespace qalam {
         std::string searchPattern;
         bool commandLine = false;
         int promptCursor = -1;
+        std::vector<std::string> overlay;
+        int overlaySelected = -1;
     };
 
     std::string renderFrame(Size size, const ViewState& view);
