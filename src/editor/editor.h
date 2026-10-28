@@ -21,7 +21,7 @@
 #include "window/layout.h"
 
 namespace qalam {
-    enum class Mode { Normal, Insert, Command, Search, Visual };
+    enum class Mode { Normal, Insert, Command, Search, Visual, Picker };
 
     class Editor {
     public:
@@ -117,6 +117,16 @@ namespace qalam {
             std::size_t left = 0;
             std::size_t right = 0;
         };
+
+        void openPicker(bool buffers);
+
+        void handlePickerKey(const Key& key);
+
+        void refreshPicker();
+
+        void acceptPicker();
+
+        void closePicker();
 
         void dispatch(const Key &key);
 
@@ -488,5 +498,10 @@ namespace qalam {
         std::size_t complIdx_ = 0;
         bool complActive_ = false;
         bool promptReg_ = false;
+        std::vector<std::string> pickItems_;
+        std::vector<std::string> pickHits_;
+        std::string pickQuery_;
+        std::size_t pickSel_ = 0;
+        bool pickBuffers_ = false;
     };
 }
