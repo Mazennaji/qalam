@@ -128,6 +128,8 @@ namespace qalam {
 
         bool canMap() const;
 
+        bool moveVisual(int direction, std::size_t count);
+
         void handleNormalKey(const Key &key);
 
         void handleOperatorKey(const Key &key, bool wasPendingG);
