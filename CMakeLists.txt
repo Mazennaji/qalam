@@ -60,7 +60,8 @@ if (QALAM_BUILD_TESTS)
             tests/test_paste.cpp
             tests/test_arabic.cpp
             tests/test_bidi.cpp
-            tests/test_bidi_render.cpp)
+            tests/test_bidi_render.cpp
+            tests/test_bidi_move.cpp)
     target_include_directories(qalam_tests PRIVATE tests)
     target_link_libraries(qalam_tests PRIVATE qalam_core)
     qalam_apply_flags(qalam_tests)
