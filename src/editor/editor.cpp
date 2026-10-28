@@ -140,6 +140,20 @@ namespace qalam {
             int cursorCol = 0;
         };
 
+        std::string builtinAlias(const std::string& name) {
+            static const std::pair<const char*, const char*> table[] = {
+                {"خلص", "q"},
+                {"احفظ", "w"},
+                {"احفظ_وخلص", "wq"},
+                {"افتح", "e"},
+                {"اخرج", "qa"},
+            };
+            for (const auto& entry : table) {
+                if (name == entry.first) return entry.second;
+            }
+            return name;
+        }
+
         int visualColumn(const std::string &line, std::size_t col, bool bidi) {
             const int logical = displayColumn(line, col);
             if (!bidi) return logical;
@@ -1490,6 +1504,8 @@ namespace qalam {
 
         if (const auto alias = aliases_.find(name); alias != aliases_.end()) {
             name = alias->second;
+        } else {
+            name = builtinAlias(name);
         }
 
         if (runRangeCommand(name, argument, first, last)) return;
