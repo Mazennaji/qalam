@@ -133,6 +133,13 @@ namespace qalam {
             return out;
         }
 
+        std::string positionKey(const std::string& path) {
+            std::error_code ec;
+            const std::filesystem::path absolute = std::filesystem::absolute(path, ec);
+            if (ec) return path;
+            return absolute.lexically_normal().string();
+        }
+
         struct ViewPlace {
             std::size_t rowOff = 0;
             int colOff = 0;
@@ -428,14 +435,22 @@ namespace qalam {
             }
         }
 
-        if (path_.empty()) return;
-        for (const auto& entry : positions_) {
-            if (entry.first == path_) {
-                placeCursor(entry.second);
-                scroll();
-            }
-        }
+        restorePosition();
     }
+
+    void Editor::restorePosition() {
+            if (!historyOn_ || path_.empty()) return;
+
+            const std::string key = positionKey(path_);
+            for (auto it = positions_.rbegin(); it != positions_.rend(); ++it) {
+                if (it->first == key) {
+                    placeCursor(it->second);
+                    scroll();
+                    return;
+                }
+            }
+    }
+
 
     void Editor::saveHistory() {
         if (!historyOn_ || historyPath_.empty()) return;
@@ -443,11 +458,12 @@ namespace qalam {
         for (std::size_t i = 0; i < docs_.size(); ++i) {
             const std::string name = docPath(i);
             if (name.empty()) continue;
+            const std::string key = positionKey(name);
             const Pos where = i == current_ ? Pos{row_, col_} : Pos{docs_[i].row, docs_[i].col};
             positions_.erase(std::remove_if(positions_.begin(), positions_.end(),
-                                            [&](const auto& e) { return e.first == name; }),
+                                            [&](const auto& e) { return e.first == key; }),
                              positions_.end());
-            positions_.emplace_back(name, where);
+            positions_.emplace_back(key, where);
         }
         if (positions_.size() > 100) {
             positions_.erase(positions_.begin(),
@@ -1941,6 +1957,7 @@ namespace qalam {
         }
 
         open(path);
+        if (!path_.empty()) restorePosition();
 
         if (path_.empty() && !pristine) {
             const std::string failure = message_;
