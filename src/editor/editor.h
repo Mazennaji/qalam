@@ -37,7 +37,7 @@ namespace qalam {
 
         void loadHistory(const std::string &path);
 
-        void saveHistory() const;
+        void saveHistory();
 
         void resize(Size size);
 
@@ -48,6 +48,8 @@ namespace qalam {
         bool idle();
 
         bool shouldQuit() const;
+
+        bool mouseEnabled() const;
 
         ViewState view() const;
 
@@ -508,5 +510,7 @@ namespace qalam {
         std::size_t pickSel_ = 0;
         bool pickBuffers_ = false;
         bool mouseDown_ = false;
+        bool mouse_ = true;
+        std::vector<std::pair<std::string, Pos>> positions_;
     };
 }
