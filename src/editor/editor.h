@@ -134,6 +134,8 @@ namespace qalam {
 
         void trackRepeat();
 
+        void restorePosition();
+
         void repeatChange(int count);
 
         void resolveMaps(bool timedOut);
