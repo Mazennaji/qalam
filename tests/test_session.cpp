@@ -127,3 +127,67 @@ TEST(garbled_position_lines_are_ignored) {
     CHECK_EQ(ed.text(), std::string("abc"));
     fs::remove_all(dir);
 }
+
+TEST(position_is_restored_by_edit_command) {
+    const fs::path dir = fs::temp_directory_path() / "qalam_session5";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::string file = (dir / "doc.txt").string();
+    const std::string hist = (dir / "history").string();
+    std::ofstream(file) << "a\nb\nc\nd\ne\n";
+
+    {
+        Ed ed("");
+        ed.e.open(file);
+        ed.e.loadHistory(hist);
+        ed.feed("4G");
+        ed.e.saveHistory();
+    }
+
+    Ed again("");
+    again.e.loadHistory(hist);
+    again.feed(":e " + file + "<CR>");
+    CHECK_EQ(again.row(), std::size_t{3});
+    fs::remove_all(dir);
+}
+
+TEST(position_keys_ignore_dot_slash_and_relative_paths) {
+    const fs::path dir = fs::temp_directory_path() / "qalam_session6";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::ofstream(dir / "doc.txt") << "a\nb\nc\nd\n";
+    const std::string hist = (dir / "history").string();
+
+    const fs::path before = fs::current_path();
+    fs::current_path(dir);
+
+    {
+        Ed ed("");
+        ed.e.open("doc.txt");
+        ed.e.loadHistory(hist);
+        ed.feed("3G");
+        ed.e.saveHistory();
+    }
+
+    Ed again("");
+    again.e.loadHistory(hist);
+    again.feed(":e ./doc.txt<CR>");
+    CHECK_EQ(again.row(), std::size_t{2});
+
+    fs::current_path(before);
+    fs::remove_all(dir);
+}
+
+TEST(edit_of_an_unknown_file_starts_at_the_top) {
+    const fs::path dir = fs::temp_directory_path() / "qalam_session7";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::string file = (dir / "fresh.txt").string();
+    std::ofstream(file) << "a\nb\nc\n";
+
+    Ed ed("");
+    ed.e.loadHistory((dir / "history").string());
+    ed.feed(":e " + file + "<CR>");
+    CHECK_EQ(ed.row(), std::size_t{0});
+    fs::remove_all(dir);
+}
