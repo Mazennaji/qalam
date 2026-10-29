@@ -127,6 +127,8 @@ namespace qalam {
                     config.wrap = value;
                 }else if (name == "bidi") {
                     config.bidi = value;
+                } else if (name == "mouse") {
+                    config.mouse = value;
                 }else if (name == "expandtab" || name == "et") {
                     config.expandtab = value;
                 } else if (name == "autoindent" || name == "ai") {
