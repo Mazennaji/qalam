@@ -1,6 +1,7 @@
 #include "terminal/decoder.h"
 
 #include <utility>
+#include <algorithm>
 
 namespace qalam {
     namespace {
@@ -84,6 +85,27 @@ namespace qalam {
             return done(std::move(key), close + end.size());
         }
 
+        bool parseMouse(const std::string& params, Key& key) {
+                int values[3] = {0, 0, 0};
+                int index = 0;
+                for (std::size_t i = 1; i < params.size(); ++i) {
+                    const char c = params[i];
+                    if (c == ';') {
+                        if (++index > 2) return false;
+                    } else if (c >= '0' && c <= '9') {
+                        values[index] = std::min(values[index] * 10 + (c - '0'), 100000);
+                    } else {
+                        return false;
+                    }
+                }
+                if (index != 2) return false;
+                key.type = KeyType::Mouse;
+                key.button = values[0];
+                key.x = std::max(values[1] - 1, 0);
+                key.y = std::max(values[2] - 1, 0);
+                return true;
+        }
+
         Decoded decodeEscape(const std::string &buf, bool final) {
             if (buf.size() == 1) return final ? done(plain(KeyType::Escape), 1) : more();
 
@@ -101,6 +123,12 @@ namespace qalam {
             if (last < 0x40 || last > 0x7e) return done(plain(KeyType::None), i);
 
             const std::size_t used = i + 1;
+            if (!params.empty() && params[0] == '<' && (last == 'M' || last == 'm')) {
+                Key key;
+                if (!parseMouse(params, key)) return done(plain(KeyType::None), used);
+                key.press = last == 'M';
+                return done(std::move(key), used);
+            }
             KeyType type = KeyType::None;
             if (last == '~') {
                 type = fromTilde(firstParam(params));
