@@ -23,13 +23,18 @@ namespace qalam {
         End,
         PageUp,
         PageDown,
-        Paste
+        Paste,
+        Mouse
     };
 
     struct Key {
         KeyType type = KeyType::None;
         char ch = 0;
         std::string text;
+        int x = 0;
+        int y = 0;
+        int button = 0;
+        bool press = false;
 
         Key() = default;
         Key(KeyType t, char c = 0, std::string s = {}) : type(t), ch(c), text(std::move(s)) {}
