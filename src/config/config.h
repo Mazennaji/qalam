@@ -26,6 +26,7 @@ namespace qalam {
         bool relativeNumber = false;
         bool wrap = false;
         bool bidi = false;
+        bool mouse = true;
         int tabstop = 4;
         int shiftwidth = 0;
         bool expandtab = false;
