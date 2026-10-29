@@ -379,6 +379,7 @@ namespace qalam {
         relative_ = config.relativeNumber;
         wrap_ = config.wrap;
         bidi_ = config.bidi;
+        mouse_ = config.mouse;
         setTabStop(config.tabstop);
         shiftwidth_ = config.shiftwidth;
         expandtab_ = config.expandtab;
@@ -397,7 +398,7 @@ namespace qalam {
         return config.found;
     }
 
-    void Editor::loadHistory(const std::string &path) {
+    void Editor::loadHistory(const std::string& path) {
         historyPath_ = path;
         if (!historyOn_ || path.empty()) return;
 
@@ -409,12 +410,49 @@ namespace qalam {
                 remember(cmdHist_, line.substr(1));
             } else if (line[0] == '/') {
                 remember(searchHist_, line.substr(1));
+            } else if (line[0] == '@') {
+                const std::size_t a = line.find(':', 1);
+                const std::size_t b = a == std::string::npos ? a : line.find(':', a + 1);
+                if (b == std::string::npos) continue;
+                const std::string rowText = line.substr(1, a - 1);
+                const std::string colText = line.substr(a + 1, b - a - 1);
+                const auto digits = [](const std::string& s) {
+                    return !s.empty() && s.size() <= 9 &&
+                           std::all_of(s.begin(), s.end(), [](char c) {
+                               return std::isdigit(static_cast<unsigned char>(c)) != 0;
+                           });
+                };
+                if (!digits(rowText) || !digits(colText)) continue;
+                positions_.emplace_back(line.substr(b + 1),
+                                        Pos{std::stoul(rowText), std::stoul(colText)});
+            }
+        }
+
+        if (path_.empty()) return;
+        for (const auto& entry : positions_) {
+            if (entry.first == path_) {
+                placeCursor(entry.second);
+                scroll();
             }
         }
     }
 
-    void Editor::saveHistory() const {
+    void Editor::saveHistory() {
         if (!historyOn_ || historyPath_.empty()) return;
+
+        for (std::size_t i = 0; i < docs_.size(); ++i) {
+            const std::string name = docPath(i);
+            if (name.empty()) continue;
+            const Pos where = i == current_ ? Pos{row_, col_} : Pos{docs_[i].row, docs_[i].col};
+            positions_.erase(std::remove_if(positions_.begin(), positions_.end(),
+                                            [&](const auto& e) { return e.first == name; }),
+                             positions_.end());
+            positions_.emplace_back(name, where);
+        }
+        if (positions_.size() > 100) {
+            positions_.erase(positions_.begin(),
+                             positions_.begin() + static_cast<std::ptrdiff_t>(positions_.size() - 100));
+        }
 
         std::error_code ec;
         const std::filesystem::path file(historyPath_);
@@ -422,8 +460,11 @@ namespace qalam {
 
         std::ofstream out(historyPath_, std::ios::trunc);
         if (!out) return;
-        for (const std::string &entry: cmdHist_) out << ':' << entry << '\n';
-        for (const std::string &entry: searchHist_) out << '/' << entry << '\n';
+        for (const std::string& entry : cmdHist_) out << ':' << entry << '\n';
+        for (const std::string& entry : searchHist_) out << '/' << entry << '\n';
+        for (const auto& entry : positions_) {
+            out << '@' << entry.second.row << ':' << entry.second.col << ':' << entry.first << '\n';
+        }
     }
 
     void Editor::resize(Size size) {
@@ -432,6 +473,8 @@ namespace qalam {
     }
 
     void Editor::handleKey(const Key &key) {
+        if (!mouse_) return;
+
         if (key.type == KeyType::Mouse) {
             handleMouse(key);
             return;
@@ -697,6 +740,10 @@ namespace qalam {
 
     bool Editor::shouldQuit() const {
         return quit_;
+    }
+
+    bool Editor::mouseEnabled() const {
+        return mouse_;
     }
 
     void Editor::setText(const std::string &text) {
@@ -4332,6 +4379,8 @@ namespace qalam {
             target = &wrap_;
         } else if (name == "bidi") {
             target = &bidi_;
+        } else if (name == "mouse") {
+            target = &mouse_;
         } else if (name == "expandtab" || name == "et") {
             target = &expandtab_;
         } else if (name == "autoindent" || name == "ai") {
@@ -4360,6 +4409,7 @@ namespace qalam {
         text += " sw=" + std::to_string(shiftWidth());
         text += " ft=" + syntax_.languageName();
         text += bidi_ ? " bidi" : " nobidi";
+        text += mouse_ ? " mouse" : " nomouse";
         return text;
     }
 
