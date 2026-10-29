@@ -138,6 +138,10 @@ namespace qalam {
 
         bool canMap() const;
 
+        void handleMouse(const Key& key);
+
+        Pos screenToPos(int x, int y) const;
+
         bool moveVisual(int direction, std::size_t count);
 
         void handleNormalKey(const Key &key);
@@ -503,5 +507,6 @@ namespace qalam {
         std::string pickQuery_;
         std::size_t pickSel_ = 0;
         bool pickBuffers_ = false;
+        bool mouseDown_ = false;
     };
 }
