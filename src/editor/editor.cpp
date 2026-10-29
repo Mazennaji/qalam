@@ -432,6 +432,11 @@ namespace qalam {
     }
 
     void Editor::handleKey(const Key &key) {
+        if (key.type == KeyType::Mouse) {
+            handleMouse(key);
+            return;
+        }
+
         if (key.type == KeyType::Paste) {
             handlePaste(key.text);
             return;
@@ -487,6 +492,97 @@ namespace qalam {
                 break;
             }
         }
+        scroll();
+    }
+
+    Pos Editor::screenToPos(int x, int y) const {
+        const Rect r = activeRect();
+        const int textRowsHere = std::max(1, r.rows - 1);
+        const int cy = std::clamp(y - r.row, 0, textRowsHere - 1);
+        const int g = gutter();
+        const int tw = textWidth();
+        const int rx = std::clamp(x - r.col - g, 0, std::max(0, tw - 1));
+        const std::size_t count = buffer_->lineCount();
+
+        std::size_t row = rowOff_;
+        int cell = 0;
+        if (wrap_) {
+            int acc = 0;
+            int seg = 0;
+            for (;;) {
+                const int h = wrapHeight(buffer_->line(row), tw);
+                if (cy < acc + h) {
+                    seg = cy - acc;
+                    break;
+                }
+                if (row + 1 >= count) {
+                    seg = h - 1;
+                    break;
+                }
+                acc += h;
+                ++row;
+            }
+            cell = seg * tw + rx;
+        } else {
+            row = std::min(rowOff_ + static_cast<std::size_t>(cy), count - 1);
+            cell = colOff_ + rx;
+        }
+
+        const std::string& line = buffer_->line(row);
+        auto logical = static_cast<std::size_t>(std::max(cell, 0));
+        if (bidi_) {
+            const std::vector<std::size_t> order = visualCellOrder(line);
+            if (!order.empty() && logical < order.size()) logical = order[logical];
+        }
+        return {row, byteForColumn(line, logical)};
+    }
+
+    void Editor::handleMouse(const Key& key) {
+        if (mode_ == Mode::Command || mode_ == Mode::Search || mode_ == Mode::Picker) return;
+
+        const bool wheel = (key.button & 64) != 0;
+        const bool drag = (key.button & 32) != 0;
+        const int base = key.button & 3;
+
+        if (wheel) {
+            if (base == 0) {
+                moveUp(3);
+            } else if (base == 1) {
+                moveDown(3);
+            }
+            scroll();
+            return;
+        }
+        if (base != 0) return;
+
+        if (drag) {
+            if (!mouseDown_) return;
+            const Pos p = screenToPos(key.x, key.y);
+            if (mode_ == Mode::Normal) enterVisual('v');
+            if (mode_ == Mode::Visual) placeCursor(p);
+            scroll();
+            return;
+        }
+
+        if (!key.press) {
+            mouseDown_ = false;
+            return;
+        }
+
+        const std::vector<Placement> placed = layout_.place(screenArea(), nullptr);
+        for (const Placement& p : placed) {
+            const Rect& r = p.rect;
+            if (key.y < r.row || key.y >= r.row + r.rows) continue;
+            if (key.x < r.col || key.x >= r.col + r.cols) continue;
+            const std::size_t index = indexOfWindow(p.id);
+            if (index != activeWin_) focusWindow(index);
+            break;
+        }
+
+        if (mode_ == Mode::Visual) leaveVisual();
+        if (mode_ == Mode::Insert) history_.close();
+        mouseDown_ = true;
+        placeCursor(screenToPos(key.x, key.y));
         scroll();
     }
 
