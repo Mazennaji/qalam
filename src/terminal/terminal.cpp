@@ -28,7 +28,7 @@ namespace qalam {
     }
 
     AlternateScreen::AlternateScreen() {
-        writeAll("\x1b[?1049h\x1b[?2004h\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[2J\x1b[H");
+        writeAll("\x1b[?1049h\x1b[?2004h\x1b[2J\x1b[H");
     }
 
     AlternateScreen::~AlternateScreen() {
