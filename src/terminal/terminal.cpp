@@ -28,11 +28,11 @@ namespace qalam {
     }
 
     AlternateScreen::AlternateScreen() {
-        writeAll("\x1b[?1049h\x1b[?2004h\x1b[2J\x1b[H");
+        writeAll("\x1b[?1049h\x1b[?2004h\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[2J\x1b[H");
     }
 
     AlternateScreen::~AlternateScreen() {
-        writeAll("\x1b[?2004l\x1b[?1049l");
+        writeAll("\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?1049l");
     }
 
     Key readKey() {
@@ -110,6 +110,7 @@ namespace qalam {
             case KeyType::Char: return std::string(1, key.ch);
             case KeyType::Text: return key.text;
             case KeyType::None: return "None";
+            case KeyType::Mouse: return "Mouse";
         }
         return "";
     }
