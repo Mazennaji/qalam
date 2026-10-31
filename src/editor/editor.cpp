@@ -133,7 +133,7 @@ namespace qalam {
             return out;
         }
 
-        std::string positionKey(const std::string& path) {
+        std::string positionKey(const std::string &path) {
             std::error_code ec;
             const std::filesystem::path absolute = std::filesystem::absolute(path, ec);
             if (ec) return path;
@@ -147,15 +147,15 @@ namespace qalam {
             int cursorCol = 0;
         };
 
-        std::string builtinAlias(const std::string& name) {
-            static const std::pair<const char*, const char*> table[] = {
+        std::string builtinAlias(const std::string &name) {
+            static const std::pair<const char *, const char *> table[] = {
                 {"خلص", "q"},
                 {"احفظ", "w"},
                 {"احفظ_وخلص", "wq"},
                 {"افتح", "e"},
                 {"اخرج", "qa"},
             };
-            for (const auto& entry : table) {
+            for (const auto &entry: table) {
                 if (name == entry.first) return entry.second;
             }
             return name;
@@ -405,7 +405,7 @@ namespace qalam {
         return config.found;
     }
 
-    void Editor::loadHistory(const std::string& path) {
+    void Editor::loadHistory(const std::string &path) {
         historyPath_ = path;
         if (!historyOn_ || path.empty()) return;
 
@@ -423,7 +423,7 @@ namespace qalam {
                 if (b == std::string::npos) continue;
                 const std::string rowText = line.substr(1, a - 1);
                 const std::string colText = line.substr(a + 1, b - a - 1);
-                const auto digits = [](const std::string& s) {
+                const auto digits = [](const std::string &s) {
                     return !s.empty() && s.size() <= 9 &&
                            std::all_of(s.begin(), s.end(), [](char c) {
                                return std::isdigit(static_cast<unsigned char>(c)) != 0;
@@ -439,18 +439,17 @@ namespace qalam {
     }
 
     void Editor::restorePosition() {
-            if (!historyOn_ || path_.empty()) return;
+        if (!historyOn_ || path_.empty()) return;
 
-            const std::string key = positionKey(path_);
-            for (auto it = positions_.rbegin(); it != positions_.rend(); ++it) {
-                if (it->first == key) {
-                    placeCursor(it->second);
-                    scroll();
-                    return;
-                }
+        const std::string key = positionKey(path_);
+        for (auto it = positions_.rbegin(); it != positions_.rend(); ++it) {
+            if (it->first == key) {
+                placeCursor(it->second);
+                scroll();
+                return;
             }
+        }
     }
-
 
     void Editor::saveHistory() {
         if (!historyOn_ || historyPath_.empty()) return;
@@ -461,7 +460,7 @@ namespace qalam {
             const std::string key = positionKey(name);
             const Pos where = i == current_ ? Pos{row_, col_} : Pos{docs_[i].row, docs_[i].col};
             positions_.erase(std::remove_if(positions_.begin(), positions_.end(),
-                                            [&](const auto& e) { return e.first == key; }),
+                                            [&](const auto &e) { return e.first == key; }),
                              positions_.end());
             positions_.emplace_back(key, where);
         }
@@ -476,9 +475,9 @@ namespace qalam {
 
         std::ofstream out(historyPath_, std::ios::trunc);
         if (!out) return;
-        for (const std::string& entry : cmdHist_) out << ':' << entry << '\n';
-        for (const std::string& entry : searchHist_) out << '/' << entry << '\n';
-        for (const auto& entry : positions_) {
+        for (const std::string &entry: cmdHist_) out << ':' << entry << '\n';
+        for (const std::string &entry: searchHist_) out << '/' << entry << '\n';
+        for (const auto &entry: positions_) {
             out << '@' << entry.second.row << ':' << entry.second.col << ':' << entry.first << '\n';
         }
     }
@@ -587,7 +586,7 @@ namespace qalam {
             cell = colOff_ + rx;
         }
 
-        const std::string& line = buffer_->line(row);
+        const std::string &line = buffer_->line(row);
         auto logical = static_cast<std::size_t>(std::max(cell, 0));
         if (bidi_) {
             const std::vector<std::size_t> order = visualCellOrder(line);
@@ -596,7 +595,7 @@ namespace qalam {
         return {row, byteForColumn(line, logical)};
     }
 
-    void Editor::handleMouse(const Key& key) {
+    void Editor::handleMouse(const Key &key) {
         if (mode_ == Mode::Command || mode_ == Mode::Search || mode_ == Mode::Picker) return;
 
         const bool wheel = (key.button & 64) != 0;
@@ -629,8 +628,8 @@ namespace qalam {
         }
 
         const std::vector<Placement> placed = layout_.place(screenArea(), nullptr);
-        for (const Placement& p : placed) {
-            const Rect& r = p.rect;
+        for (const Placement &p: placed) {
+            const Rect &r = p.rect;
             if (key.y < r.row || key.y >= r.row + r.rows) continue;
             if (key.x < r.col || key.x >= r.col + r.cols) continue;
             const std::size_t index = indexOfWindow(p.id);
@@ -858,11 +857,11 @@ namespace qalam {
                 const std::size_t first = pickSel_ >= maxLines ? pickSel_ - maxLines + 1 : 0;
                 for (std::size_t i = first; i < pickHits_.size() && v.overlay.size() < maxLines; ++i) {
                     v.overlay.push_back(pickHits_[i]);
+                    v.overlayMarks.push_back(fuzzyPositions(pickQuery_, pickHits_[i]));
                 }
                 v.overlaySelected = static_cast<int>(pickSel_ - first);
             }
-        }
-        else if (highlight_) {
+        } else if (highlight_) {
             v.searchPattern = lastSearch_;
         }
 
@@ -4056,7 +4055,7 @@ namespace qalam {
         }
     }
 
-    void Editor::handlePickerKey(const Key& key) {
+    void Editor::handlePickerKey(const Key &key) {
         auto up = [&] {
             if (pickSel_ > 0) --pickSel_;
         };
@@ -4113,7 +4112,6 @@ namespace qalam {
                 break;
         }
     }
-
 
     void Editor::mapCommand(const std::string &argument, bool remove) {
         std::istringstream stream(argument);
