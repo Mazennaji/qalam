@@ -53,6 +53,7 @@ namespace qalam {
         int promptCursor = -1;
         std::vector<std::string> overlay;
         int overlaySelected = -1;
+        std::vector<std::vector<std::size_t>> overlayMarks;
     };
 
     std::string renderFrame(Size size, const ViewState& view);
