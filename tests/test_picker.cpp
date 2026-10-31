@@ -156,3 +156,16 @@ TEST(picker_survives_tiny_screens) {
         }
     }
 }
+
+TEST(picker_emphasizes_matched_characters) {
+    Project p;
+    Ed ed("");
+    Size size;
+    size.rows = 12;
+    size.cols = 40;
+    ed.e.resize(size);
+    ed.feed(":pick<CR>bet");
+    CHECK(!ed.e.view().overlayMarks.empty());
+    CHECK_EQ(ed.e.view().overlayMarks[0].size(), std::size_t{3});
+    CHECK(has(renderFrame(size, ed.e.view()), "\x1b[1;4m"));
+}

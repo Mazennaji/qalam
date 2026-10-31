@@ -114,3 +114,32 @@ TEST(find_command_opens_the_best_match) {
     fs::current_path(before);
     fs::remove_all(root);
 }
+
+TEST(fuzzy_positions_follow_the_query_in_order) {
+    const std::vector<std::size_t> p = fuzzyPositions("edc", "src/editor/editor.cpp");
+    CHECK_EQ(p.size(), std::size_t{3});
+    CHECK(p[0] < p[1] && p[1] < p[2]);
+    CHECK_EQ(std::string("src/editor/editor.cpp").substr(p[0], 1), std::string("e"));
+}
+
+TEST(fuzzy_positions_empty_when_there_is_no_match) {
+    CHECK(fuzzyPositions("zzz", "abc").empty());
+    CHECK(fuzzyPositions("", "abc").empty());
+    CHECK(fuzzyPositions("abcd", "abc").empty());
+}
+
+TEST(fuzzy_positions_respect_smartcase) {
+    CHECK_EQ(fuzzyPositions("ed", "Editor").size(), std::size_t{2});
+    CHECK(fuzzyPositions("Ed", "editor").empty());
+}
+
+TEST(fuzzy_positions_agree_with_the_score) {
+    const char* names[] = {"line_buffer.cpp", "README.md", "a/b/c.txt"};
+    for (const char* n : names) {
+        for (const char* q : {"l", "lb", "re", "abc", "zz"}) {
+            const bool scored = fuzzyScore(q, n).has_value();
+            const bool placed = !fuzzyPositions(q, n).empty();
+            CHECK_EQ(scored, placed);
+        }
+    }
+}
