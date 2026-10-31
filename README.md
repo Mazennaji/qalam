@@ -37,7 +37,7 @@ Qalam (قلم) is Arabic for *pen*. It keeps what makes modal editing great
 ## Install
 
 ```bash
-git clone https://github.com/Mazennaji/qalam.git
+git clone https://github.com/YOUR_USERNAME/qalam.git
 cd qalam
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
@@ -143,8 +143,9 @@ filter, `Up` and `Down` (or `Ctrl-P` and `Ctrl-N`) to select, `Enter` to open,
 
 Matching is a case-insensitive subsequence match (smartcase applies). It rewards
 consecutive characters and matches after `/ _ - .` or at a camelCase boundary,
-and it prefers shorter paths. Hidden entries, `node_modules`, `build*`, and
-`target` are skipped, and the listing is capped at 20,000 files.
+and it prefers shorter paths. Matched characters are bold and underlined in the
+list. Hidden entries, `node_modules`, `build*`, and `target` are skipped, and the
+listing is capped at 20,000 files.
 
 ```
 map normal <Space>f :pick<CR>
@@ -323,13 +324,12 @@ cmake --build build-bench
 - [x] Atomic saves, CRLF handling, binary-safe I/O
 - [x] Unit and scenario tests, CI with sanitizers
 - [x] Chunked line store with benchmark
-- [x] Fuzzy file and buffer finder, live picker
+- [x] Fuzzy file and buffer finder, live picker with match highlighting
 - [x] Mouse support
 - [x] Remembered cursor positions
 - [x] Arabic: bidi display, visual `h`/`l`, Arabic command aliases
 - [ ] Arabic: mirrored brackets, RTL end-of-line cursor, visual `j`/`k` columns
 - [ ] Persistent undo
-- [ ] Picker match highlighting
 
 ## Contributing
 
