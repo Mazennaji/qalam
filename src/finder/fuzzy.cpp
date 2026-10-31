@@ -86,6 +86,30 @@ namespace qalam {
         return best - static_cast<int>(n) / 8;
     }
 
+    std::vector<std::size_t> fuzzyPositions(const std::string& query, const std::string& cand) {
+        std::vector<std::size_t> out;
+        if (query.empty()) return out;
+
+        const bool sensitive = std::any_of(query.begin(), query.end(), [](char c) {
+            return std::isupper(static_cast<unsigned char>(c)) != 0;
+        });
+        auto eq = [&](char a, char b) {
+            if (sensitive) return a == b;
+            return std::tolower(static_cast<unsigned char>(a)) ==
+                   std::tolower(static_cast<unsigned char>(b));
+        };
+
+        std::size_t qi = 0;
+        for (std::size_t j = 0; j < cand.size() && qi < query.size(); ++j) {
+            if (eq(query[qi], cand[j])) {
+                out.push_back(j);
+                ++qi;
+            }
+        }
+        if (qi < query.size()) out.clear();
+        return out;
+    }
+
     std::vector<std::string> rankFuzzy(const std::string &query,
                                        const std::vector<std::string> &candidates,
                                        std::size_t limit) {

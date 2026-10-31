@@ -13,4 +13,5 @@ namespace qalam {
                                        std::size_t limit);
 
     std::vector<std::string> listFiles(const std::string &root, std::size_t limit);
+    std::vector<std::size_t> fuzzyPositions(const std::string& query, const std::string& candidate);
 }
