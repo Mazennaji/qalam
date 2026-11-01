@@ -34,6 +34,19 @@ namespace {
         return hay.find(needle) != std::string::npos;
     }
 
+    std::string plain(const std::string& frame) {
+        std::string out;
+        for (std::size_t i = 0; i < frame.size(); ++i) {
+            if (frame[i] == '\x1b' && i + 1 < frame.size() && frame[i + 1] == '[') {
+                i += 2;
+                while (i < frame.size() && (frame[i] < 0x40 || frame[i] > 0x7e)) ++i;
+                continue;
+            }
+            out += frame[i];
+        }
+        return out;
+    }
+
 }
 
 TEST(picker_opens_filters_and_opens_the_match) {
@@ -136,10 +149,11 @@ TEST(picker_renders_the_prompt_and_list) {
     ed.e.resize(size);
     ed.feed(":pick<CR>alp");
     const std::string frame = renderFrame(size, ed.e.view());
-    CHECK(has(frame, "file> alp"));
-    CHECK(has(frame, "alpha.txt"));
+    const std::string text = plain(frame);
+    CHECK(has(text, "file> alp"));
+    CHECK(has(text, "alpha.txt"));
     CHECK(has(frame, "\x1b[7m"));
-    CHECK(has(frame, "PICK"));
+    CHECK(has(text, "PICK"));
 }
 
 TEST(picker_survives_tiny_screens) {
