@@ -176,6 +176,12 @@ namespace qalam {
 
         void gotoBuffer(const std::string &argument);
 
+        std::string undoFile() const;
+
+        void writeUndo();
+
+        void restoreUndo();
+
         void listBuffers();
 
         bool saveAll();
