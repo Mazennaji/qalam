@@ -27,15 +27,14 @@ function(qalam_apply_flags target)
     endif ()
 endfunction()
 
-add_library(qalam_core STATIC ${QALAM_SOURCES}
-        src/text/bidi.cpp
-        src/text/bidi.h)
+add_library(qalam_core STATIC ${QALAM_SOURCES})
 target_include_directories(qalam_core PUBLIC src)
 target_compile_features(qalam_core PUBLIC cxx_std_20)
 qalam_apply_flags(qalam_core)
 
 add_executable(qalam src/main.cpp)
 target_link_libraries(qalam PRIVATE qalam_core)
+target_compile_definitions(qalam PRIVATE QALAM_VERSION="${PROJECT_VERSION}")
 qalam_apply_flags(qalam)
 
 install(TARGETS qalam RUNTIME DESTINATION bin)
@@ -62,8 +61,11 @@ if (QALAM_BUILD_TESTS)
             tests/test_bidi.cpp
             tests/test_bidi_render.cpp
             tests/test_bidi_move.cpp
+            tests/test_fuzzy.cpp
             tests/test_picker.cpp
-            tests/test_mouse.cpp)
+            tests/test_mouse.cpp
+            tests/test_session.cpp
+            tests/test_undo_persist.cpp)
     target_include_directories(qalam_tests PRIVATE tests)
     target_link_libraries(qalam_tests PRIVATE qalam_core)
     qalam_apply_flags(qalam_tests)
