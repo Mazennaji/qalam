@@ -3,12 +3,15 @@
 #include <cstddef>
 #include <optional>
 #include <vector>
+#include <cstdint>
+#include <string>
 
 #include "buffer/edit.h"
 #include "buffer/pos.h"
 #include "buffer/text_buffer.h"
 
 namespace qalam {
+    std::uint64_t fnv1a(const std::string& data);
 
     class UndoHistory {
     public:
@@ -22,6 +25,8 @@ namespace qalam {
         bool modified() const;
         std::size_t touchedRow() const;
         void clear();
+        std::string serialize() const;
+        bool deserialize(const std::string& data);
 
     private:
         using Group = std::vector<Edit>;
