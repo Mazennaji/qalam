@@ -9,6 +9,7 @@
 #include <optional>
 #include <sstream>
 #include <utility>
+#include <cstdint>
 
 #include "buffer/file_io.h"
 #include "buffer/line_buffer.h"
@@ -449,6 +450,77 @@ namespace qalam {
                 return;
             }
         }
+    }
+
+    std::string Editor::undoFile() const {
+        if (!historyOn_ || historyPath_.empty() || path_.empty()) return "";
+        char name[17];
+        std::snprintf(name, sizeof name, "%016llx",
+                      static_cast<unsigned long long>(fnv1a(positionKey(path_))));
+        const std::filesystem::path dir = std::filesystem::path(historyPath_).parent_path() / "undo";
+        return (dir / name).string();
+    }
+
+    void Editor::writeUndo() {
+        const std::string file = undoFile();
+        if (file.empty()) return;
+
+        history_.close();
+        const std::string body = history_.serialize();
+        if (body.size() > (std::size_t{32} << 20)) return;
+
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::path(file).parent_path(), ec);
+
+        const std::string temp = file + ".tmp";
+        {
+            std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+            if (!out) return;
+            out << "QUNDO1\nH " << fnv1a(bufferText()) << "\nB " << body.size() << "\n"
+                << body << "C " << fnv1a(body) << "\n";
+            if (!out) return;
+        }
+        std::filesystem::rename(temp, file, ec);
+        if (ec) std::filesystem::remove(temp, ec);
+    }
+
+    void Editor::restoreUndo() {
+        const std::string file = undoFile();
+        if (file.empty() || history_.modified()) return;
+
+        std::ifstream in(file, std::ios::binary);
+        if (!in) return;
+        const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+        std::size_t pos = 0;
+        auto line = [&](std::string& out) {
+            const std::size_t end = data.find('\n', pos);
+            if (end == std::string::npos) return false;
+            out = data.substr(pos, end - pos);
+            pos = end + 1;
+            return true;
+        };
+
+        std::string magic, hashLine, sizeLine;
+        if (!line(magic) || magic != "QUNDO1" || !line(hashLine) || !line(sizeLine)) return;
+        if (hashLine.rfind("H ", 0) != 0 || sizeLine.rfind("B ", 0) != 0) return;
+
+        std::uint64_t wanted = 0;
+        std::size_t size = 0;
+        try {
+            wanted = std::stoull(hashLine.substr(2));
+            size = std::stoull(sizeLine.substr(2));
+        } catch (...) {
+            return;
+        }
+        if (wanted != fnv1a(bufferText()) || size > data.size() - pos) return;
+
+        const std::string body = data.substr(pos, size);
+        pos += size;
+        std::string trailer;
+        if (!line(trailer) || trailer != "C " + std::to_string(fnv1a(body))) return;
+
+        history_.deserialize(body);
     }
 
     void Editor::saveHistory() {
