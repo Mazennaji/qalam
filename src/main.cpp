@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <exception>
 #include <memory>
+#include <string>
 
 #include "buffer/line_buffer.h"
 #include "config/config.h"
@@ -12,6 +13,28 @@ using namespace qalam;
 
 int main(int argc, char **argv) {
     try {
+        for (int i = 1; i < argc; ++i) {
+                const std::string arg = argv[i];
+                if (arg == "--version" || arg == "-v") {
+                    std::printf("qalam %s\n", QALAM_VERSION);
+                    return 0;
+                }
+                if (arg == "--help" || arg == "-h") {
+                    std::printf(
+                        "qalam %s - the pen for your terminal\n\n"
+                        "usage: qalam [options] [file ...]\n\n"
+                        "  -h, --help      show this help\n"
+                        "  -v, --version   show the version\n\n"
+                        "config:  $QALAM_CONFIG, else ~/.config/qalam/keymap.conf\n"
+                        "quit:    :q  (or :khalas)\n",
+                        QALAM_VERSION);
+                    return 0;
+                }
+                if (arg.size() > 1 && arg[0] == '-' && arg != "-") {
+                    std::fprintf(stderr, "qalam: unknown option '%s' (try --help)\n", arg.c_str());
+                    return 2;
+                }
+        }
         RawMode raw;
         AlternateScreen screen;
 
