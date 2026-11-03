@@ -65,6 +65,7 @@ if (QALAM_BUILD_TESTS)
             tests/test_picker.cpp
             tests/test_mouse.cpp
             tests/test_session.cpp
+            tests/test_undo_persist.cpp
             tests/test_undo_persist.cpp)
     target_include_directories(qalam_tests PRIVATE tests)
     target_link_libraries(qalam_tests PRIVATE qalam_core)
