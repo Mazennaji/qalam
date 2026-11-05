@@ -437,6 +437,7 @@ namespace qalam {
         }
 
         restorePosition();
+        restoreUndo();
     }
 
     void Editor::restorePosition() {
@@ -1901,6 +1902,7 @@ namespace qalam {
             refreshSyntax();
         }
         if (target == path_) history_.markSaved();
+        if (target == path_) writeUndo();
         message_ = describe(target, countLines(*buffer_, *bytes), *bytes) + " written";
         return true;
     }
@@ -2029,6 +2031,7 @@ namespace qalam {
 
         open(path);
         if (!path_.empty()) restorePosition();
+        if (!path_.empty()) restoreUndo();
 
         if (path_.empty() && !pristine) {
             const std::string failure = message_;

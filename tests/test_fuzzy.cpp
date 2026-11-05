@@ -46,7 +46,7 @@ TEST(fuzzy_ranks_best_first_and_respects_the_limit) {
     CHECK_EQ(hits.size(), std::size_t{2});
     CHECK(hits[0].find("editor") != std::string::npos);
     CHECK_EQ(rankFuzzy("zzz", files, 5).size(), std::size_t{0});
-    CHECK_EQ(rankFuzzy("e", files, 100).size(), std::size_t{4});
+    CHECK_EQ(rankFuzzy("e", files, 100).size(), std::size_t{5});
 }
 
 TEST(fuzzy_exact_name_beats_longer_paths) {

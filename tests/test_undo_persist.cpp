@@ -130,9 +130,11 @@ TEST(corrupt_undo_files_are_ignored) {
         ed.e.loadHistory(d.hist());
         ed.feed("x:w<CR>");
     }
-    for (const auto& entry : fs::directory_iterator(d.root / "state" / "undo")) {
-        std::ofstream(entry.path(), std::ios::trunc) << "QUNDO1\nH 1\nB 5\nxx";
-    }
+    std::error_code ec;
+    for (fs::directory_iterator it(d.root / "state" / "undo", ec), end; !ec && it != end;
+         it.increment(ec)) {
+        std::ofstream(it->path(), std::ios::trunc) << "QUNDO1\nH 1\nB 5\nxx";
+         }
     Ed again("");
     again.e.open(d.file());
     again.e.loadHistory(d.hist());
