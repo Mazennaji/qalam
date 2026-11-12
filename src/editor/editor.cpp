@@ -561,7 +561,6 @@ namespace qalam {
     }
 
     void Editor::handleKey(const Key &key) {
-        if (!mouse_) return;
 
         if (key.type == KeyType::Mouse) {
             handleMouse(key);
@@ -669,6 +668,7 @@ namespace qalam {
     }
 
     void Editor::handleMouse(const Key &key) {
+        if (!mouse_) return;
         if (mode_ == Mode::Command || mode_ == Mode::Search || mode_ == Mode::Picker) return;
 
         const bool wheel = (key.button & 64) != 0;
