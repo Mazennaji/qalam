@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <cstdio>
 
 #include "harness.h"
 
@@ -40,6 +41,16 @@ TEST(nomouse_ignores_clicks) {
     ed.e.handleKey(click(6, 0, true));
     ed.e.handleKey(click(6, 0, false));
     CHECK_EQ(ed.col(), std::size_t{6});
+}
+
+TEST(probe_mouse_messages) {
+    Ed ed("hello");
+    ed.feed(":set nomouse<CR>");
+    std::printf("A enabled=%d msg=[%s]\n", ed.e.mouseEnabled() ? 1 : 0, ed.e.message().c_str());
+    ed.feed(":set<CR>");
+    std::printf("B msg=[%s]\n", ed.e.message().c_str());
+    ed.feed(":set mouse<CR>");
+    std::printf("C enabled=%d msg=[%s]\n", ed.e.mouseEnabled() ? 1 : 0, ed.e.message().c_str());
 }
 
 TEST(cursor_position_is_restored_on_reopen) {
