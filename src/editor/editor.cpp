@@ -10,6 +10,7 @@
 #include <sstream>
 #include <utility>
 #include <cstdint>
+#include <cstdlib>
 
 #include "buffer/file_io.h"
 #include "buffer/line_buffer.h"
@@ -148,6 +149,64 @@ namespace qalam {
             int cursorRow = 0;
             int cursorCol = 0;
         };
+
+        struct SortKey {
+            bool has = false;
+            long long value = 0;
+        };
+
+        SortKey numberIn(const std::string& s) {
+            for (std::size_t i = 0; i < s.size(); ++i) {
+                if (std::isdigit(static_cast<unsigned char>(s[i])) == 0) continue;
+                const bool negative = i > 0 && s[i - 1] == '-';
+                long long v = 0;
+                std::size_t digits = 0;
+                while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i])) != 0 && digits < 18) {
+                    v = v * 10 + (s[i] - '0');
+                    ++i;
+                    ++digits;
+                }
+                return {true, negative ? -v : v};
+            }
+            return {};
+        }
+
+        std::string foldCase(std::string s) {
+            for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return s;
+        }
+
+        std::string sortedLines(std::vector<std::string> lines, bool reverse, bool numeric, bool fold,
+                                bool unique) {
+            auto less = [&](const std::string& a, const std::string& b) {
+                if (numeric) {
+                    const SortKey ka = numberIn(a);
+                    const SortKey kb = numberIn(b);
+                    if (ka.has != kb.has) return !ka.has;
+                    if (ka.has && ka.value != kb.value) return ka.value < kb.value;
+                    if (ka.has) return false;
+                }
+                return fold ? foldCase(a) < foldCase(b) : a < b;
+            };
+
+            std::stable_sort(lines.begin(), lines.end(), [&](const std::string& a, const std::string& b) {
+                return reverse ? less(b, a) : less(a, b);
+            });
+            if (unique) {
+                lines.erase(std::unique(lines.begin(), lines.end(),
+                                        [&](const std::string& a, const std::string& b) {
+                                            return !less(a, b) && !less(b, a);
+                                        }),
+                            lines.end());
+            }
+
+            std::string out;
+            for (std::size_t i = 0; i < lines.size(); ++i) {
+                if (i > 0) out += '\n';
+                out += lines[i];
+            }
+            return out;
+        }
 
         std::string builtinAlias(const std::string &name) {
             static const std::pair<const char *, const char *> table[] = {
@@ -1876,6 +1935,41 @@ namespace qalam {
             openPicker(true);
         } else if (name == "help" || name == "h") {
             showHelp(argument);
+        } else if (name == "sort" || name == "sor") {
+            bool numeric = false;
+            bool fold = false;
+            bool unique = false;
+            for (char f : argument) {
+                if (f == 'n') {
+                    numeric = true;
+                } else if (f == 'i') {
+                    fold = true;
+                } else if (f == 'u') {
+                    unique = true;
+                } else if (f != ' ') {
+                    message_ = "usage: :sort[!] [n] [i] [u]";
+                    return;
+                }
+            }
+
+            const std::size_t top = ranged ? first : 0;
+            const std::size_t bottom = ranged ? last : buffer_->lineCount() - 1;
+            std::vector<std::string> lines;
+            for (std::size_t r = top; r <= bottom; ++r) lines.push_back(buffer_->line(r));
+            const std::size_t before = lines.size();
+
+            const std::string text = sortedLines(std::move(lines), force, numeric, fold, unique);
+            if (text == buffer_->text({top, 0}, {bottom, buffer_->line(bottom).size()})) {
+                message_ = "Already sorted";
+                return;
+            }
+            applyEdit({top, 0}, {bottom, buffer_->line(bottom).size()}, text);
+            placeCursor({top, 0});
+
+            const std::size_t after =
+                static_cast<std::size_t>(std::count(text.begin(), text.end(), '\n')) + 1;
+            message_ = std::to_string(before) + " lines sorted";
+            if (after < before) message_ += ", " + std::to_string(before - after) + " removed";
         } else if (name == "reload") {
             message_.clear();
             const bool found = useConfig(configPath_);
