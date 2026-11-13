@@ -178,3 +178,45 @@ TEST(syntax_custom_color_and_reset) {
     CHECK_EQ(s.sgr(Kind::Keyword), std::string("\x1b[38;5;176m"));
     CHECK_EQ(s.sgr(Kind::Normal), std::string(""));
 }
+
+TEST(syntax_incremental_edits_match_a_fresh_pass) {
+    std::string text;
+    for (int i = 0; i < 300; ++i) {
+        text += "int v" + std::to_string(i) + " = " + std::to_string(i) +
+                "; // c\nconst char* s = \"str\";\n";
+    }
+    LineBuffer b;
+    b.replace({0, 0}, {0, 0}, text);
+
+    Syntax s;
+    s.setFile("a.cpp");
+    s.kinds(b, b.lineCount() - 1);
+
+    const std::vector<std::string> pieces = {"/*", "*/", "\"", "x", "\n", "//", "R\"(", ")\"",
+                                             "\n\n", "'", "a\nb"};
+    unsigned seed = 2026;
+    auto next = [&] {
+        seed = seed * 1103515245u + 12345u;
+        return seed >> 8;
+    };
+
+    for (int step = 0; step < 250; ++step) {
+        const std::size_t r1 = next() % b.lineCount();
+        const std::size_t c1 = next() % (b.line(r1).size() + 1);
+        const std::size_t r2 = std::min(r1 + next() % 3, b.lineCount() - 1);
+        std::size_t c2 = next() % (b.line(r2).size() + 1);
+        if (r2 == r1 && c2 < c1) c2 = c1;
+        const std::string ins = pieces[next() % pieces.size()];
+
+        b.replace({r1, c1}, {r2, c2}, ins);
+        s.edited(b, r1, r2 - r1, endOf({r1, c1}, ins).row - r1);
+        s.kinds(b, next() % b.lineCount());
+
+        if (step % 10 != 0) continue;
+        Syntax fresh;
+        fresh.setFile("a.cpp");
+        for (std::size_t r = 0; r < b.lineCount(); ++r) {
+            CHECK(s.kinds(b, r) == fresh.kinds(b, r));
+        }
+    }
+}
