@@ -2746,12 +2746,14 @@ namespace qalam {
         enterInsert();
     }
 
-    void Editor::applyEdit(Pos start, Pos end, const std::string &text) {
+    void Editor::applyEdit(Pos start, Pos end, const std::string& text) {
         changed_ = true;
         adjustMarks(start, end, text);
         adjustTracked(start, end, text);
-        syntax_.invalidate(start.row);
-        history_.record(buffer_->replace(start, end, text));
+        Edit edit = buffer_->replace(start, end, text);
+        syntax_.edited(*buffer_, start.row, end.row - start.row,
+                       endOf(start, text).row - start.row);
+        history_.record(std::move(edit));
     }
 
     void Editor::undo(int count) {
