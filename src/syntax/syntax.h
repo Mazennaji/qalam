@@ -19,6 +19,7 @@ namespace qalam {
         struct State {
             unsigned char mode = 0;
             std::string delim;
+            bool operator==(const State&) const = default;
         };
 
         Syntax();
@@ -44,6 +45,9 @@ namespace qalam {
         void resetColors();
 
         void invalidate(std::size_t row);
+
+        void edited(const TextBuffer& buffer, std::size_t row, std::size_t removed,
+            std::size_t added);
 
         const std::vector<Kind> &kinds(const TextBuffer &buffer, std::size_t row) const;
 
