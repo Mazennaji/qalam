@@ -198,6 +198,8 @@ namespace qalam {
 
         Rect activeRect() const;
 
+        void showHelp(const std::string& topic);
+
         std::size_t indexOfWindow(int id) const;
 
         void saveWindow();

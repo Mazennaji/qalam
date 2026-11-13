@@ -19,6 +19,7 @@
 #include "text/columns.h"
 #include "finder/fuzzy.h"
 #include "text/bidi.h"
+#include "editor/help.h"
 
 namespace qalam {
     namespace {
@@ -1873,6 +1874,8 @@ namespace qalam {
             openPicker(false);
         } else if (name == "pickb") {
             openPicker(true);
+        } else if (name == "help" || name == "h") {
+            showHelp(argument);
         } else if (name == "reload") {
             message_.clear();
             const bool found = useConfig(configPath_);
@@ -4063,6 +4066,28 @@ namespace qalam {
                 return;
             }
         }
+    }
+
+    void Editor::showHelp(const std::string& topic) {
+        const bool pristine = path_.empty() && !history_.modified() &&
+                              buffer_->lineCount() == 1 && buffer_->line(0).empty();
+        if (!pristine) {
+            stash();
+            Doc fresh;
+            fresh.buffer = std::make_unique<LineBuffer>();
+            docs_.push_back(std::move(fresh));
+            activate(docs_.size() - 1);
+        }
+
+        setText(helpText());
+        filetype_ = "markdown";
+        refreshSyntax();
+        message_ = "Help: /word or :help TOPIC searches, :bd closes";
+
+        if (topic.empty()) return;
+        lastSearch_ = topic;
+        lastForward_ = true;
+        findNext(false, 1);
     }
 
     void Editor::openPicker(bool buffers) {
