@@ -667,6 +667,31 @@ namespace qalam {
         if (starts_.size() > row + 1) starts_.resize(row + 1);
     }
 
+    void Syntax::edited(const TextBuffer& buffer, std::size_t row, std::size_t removed,
+                    std::size_t added) {
+        if (lang_ == nullptr) {
+            starts_.clear();
+            return;
+        }
+
+        const std::size_t from = row + 1;
+        if (starts_.size() <= from) return;
+
+        const std::size_t cut = std::min(removed, starts_.size() - from);
+        starts_.erase(starts_.begin() + static_cast<std::ptrdiff_t>(from),
+                      starts_.begin() + static_cast<std::ptrdiff_t>(from + cut));
+        if (starts_.size() <= from) return;
+
+        starts_.insert(starts_.begin() + static_cast<std::ptrdiff_t>(from), added, State{});
+        if (starts_.size() > buffer.lineCount()) starts_.resize(buffer.lineCount());
+
+        for (std::size_t k = row; k + 1 < starts_.size() && k < buffer.lineCount(); ++k) {
+            State next = highlightLine(*lang_, buffer.line(k), starts_[k], nullptr);
+            if (k >= row + added && next == starts_[k + 1]) break;
+            starts_[k + 1] = std::move(next);
+        }
+    }
+
     const std::vector<Kind> &Syntax::kinds(const TextBuffer &buffer, std::size_t row) const {
         if (lang_ == nullptr || row >= buffer.lineCount()) {
             scratch_.clear();
