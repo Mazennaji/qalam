@@ -125,6 +125,8 @@ and `/` prompts it goes into the line. In Normal mode it is ignored.
 | `:pick` `:pickb` | Live fuzzy picker over project files or open buffers |
 | `:set …` | `number` `relativenumber` `wrap` `bidi` `mouse` `expandtab` `autoindent` `syntax` `ts=N` `sw=N` `ft=LANG` |
 | `:map` `:unmap` | Runtime key mappings |
+| `:help` `:help TOPIC` | Open the in-editor manual, optionally jumping to a topic |
+| `:sort[!] [n i u]` | Sort lines (`!` reverses, `n` numeric, `i` case-insensitive, `u` unique) |
 | `:reg` `:noh` `:syntax on/off` `:reload` | Registers, highlighting, config |
 | `:خلص` `:احفظ` `:احفظ_وخلص` `:افتح` `:اخرج` | Arabic aliases for `:q` `:w` `:wq` `:e` `:qa` |
 
