@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add the in-editor manual with `:help` and `:help TOPIC`
+- Add line sorting with `:sort[!] [n i u]`
+
 ## 0.1.0
 
 First public release.
