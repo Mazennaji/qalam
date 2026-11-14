@@ -9,7 +9,7 @@
 A fast, hackable modal text editor.
 No dependencies. No bloat. Every key is yours to remap.
 
-[![CI](https://github.com/YOUR_USERNAME/qalam/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/qalam/actions/workflows/ci.yml)
+[![CI](https://github.com/Mazennaji/qalam/actions/workflows/ci.yml/badge.svg)](https://github.com/Mazennaji/qalam/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20wsl-lightgrey)](#install)
 [![Status](https://img.shields.io/badge/status-usable%20alpha-yellowgreen)](#roadmap)
@@ -37,7 +37,7 @@ Qalam (قلم) is Arabic for *pen*. It keeps what makes modal editing great
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/qalam.git
+git clone https://github.com/Mazennaji/qalam.git
 cd qalam
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
