@@ -26,13 +26,13 @@ No dependencies. No bloat. Every key is yours to remap.
 Qalam (قلم) is Arabic for *pen*. It keeps what makes modal editing great
 (composable commands, hands on the home row, speed) and drops the legacy baggage.
 
-- **Fast.** One write per frame, instant startup, and a chunked buffer that edits a 200,000-line file in microseconds.
+- **Fast.** One write per frame, instant startup, a chunked buffer that edits a 200,000-line file in microseconds, and incremental syntax updates.
 - **Small.** A codebase you can read in a weekend.
 - **Hackable.** Key mappings, aliases, colors, and options live in one plain config file.
 - **Self-contained.** No third-party libraries, just the C++ standard library and POSIX `termios`.
 - **Unicode-aware.** UTF-8 input, wide characters, combining marks, and right-to-left text.
-- **Careful with your files.** Atomic saves, preserved permissions and line endings, byte-exact round trips.
-- **Batteries included.** Fuzzy file finder, mouse, system clipboard, and bracketed paste with no plugins.
+- **Careful with your files.** Atomic saves, preserved permissions and line endings, byte-exact round trips, and undo that survives quitting.
+- **Batteries included.** Fuzzy finder, mouse, system clipboard, bracketed paste, and an in-editor manual, with no plugins.
 
 ## Install
 
@@ -59,7 +59,11 @@ On Windows, use a WSL toolchain.
 ```bash
 qalam notes.txt
 qalam main.cpp util.cpp     # several files, one buffer each
+qalam --version
+qalam --help
 ```
+
+Inside qalam, `:help` opens the manual and `:help TOPIC` jumps to a topic.
 
 | Mode        | Enter with              | Purpose                          |
 |-------------|-------------------------|----------------------------------|
@@ -120,15 +124,18 @@ and `/` prompts it goes into the line. In Normal mode it is ignored.
 | `:g/pat/cmd` `:v/pat/cmd` | Run a command on matching or non-matching lines |
 | `:normal KEYS` | Run Normal-mode keys on each line of a range |
 | `:d` `:y` `:m` `:t` `:>` `:<` | Line commands with ranges (`%`, `N,M`, `.`, `$`) |
+| `:sort[!] [n] [i] [u]` | Sort lines: reverse, numeric, ignore case, unique |
+| `:retab` `:trim` | Convert indentation to your tab settings, strip trailing whitespace |
 | `:r FILE` | Insert a file below the current line |
 | `:find Q` `:fb Q` | Open the best fuzzy match among project files or open buffers |
 | `:pick` `:pickb` | Live fuzzy picker over project files or open buffers |
+| `:help` `:help TOPIC` | Open the in-editor manual, optionally jumping to a topic |
 | `:set …` | `number` `relativenumber` `wrap` `bidi` `mouse` `expandtab` `autoindent` `syntax` `ts=N` `sw=N` `ft=LANG` |
 | `:map` `:unmap` | Runtime key mappings |
-| `:help` `:help TOPIC` | Open the in-editor manual, optionally jumping to a topic |
-| `:sort[!] [n i u]` | Sort lines (`!` reverses, `n` numeric, `i` case-insensitive, `u` unique) |
 | `:reg` `:noh` `:syntax on/off` `:reload` | Registers, highlighting, config |
 | `:خلص` `:احفظ` `:احفظ_وخلص` `:افتح` `:اخرج` | Arabic aliases for `:q` `:w` `:wq` `:e` `:qa` |
+
+Ranges and `!` work where they make sense, for example `:2,9sort!` or `:%trim`.
 
 The command line supports history (`Up` / `Down`), cursor movement, `Ctrl-W`,
 `Ctrl-U`, `Ctrl-R` for registers, and `Tab` completion for commands and paths.
@@ -195,7 +202,8 @@ memory for `j` and `k`.
 Detection uses the file extension first, then a `#!` line. Override it per buffer
 with `:set ft=python`, turn it off with `:set ft=none`, and return to automatic
 with `:set ft=`. Adding a language means adding one table entry in
-`src/syntax/syntax.cpp`.
+`src/syntax/syntax.cpp`. After an edit, qalam repairs only the highlight state of
+the rows that changed, so typing stays fast in very large files.
 
 ## Files
 
@@ -205,6 +213,7 @@ with `:set ft=`. Adding a language means adding one table entry in
 - **Binary-safe.** NUL bytes, invalid UTF-8, and very long lines survive a round trip.
 - **Final newline.** A missing one is added on save.
 - **Remembered positions.** Reopening a file, at startup or with `:e`, puts the cursor where you left it. The last 100 files are kept.
+- **Persistent undo.** `:w` also saves the undo history. Reopen the file and `u` and `Ctrl-R` still work, as long as the file hasn't changed since you saved it. Edits made after your last save are not stored.
 
 ## Configuration
 
@@ -242,10 +251,11 @@ Key notation: `<Esc> <CR> <Tab> <BS> <Space> <Lt> <Gt> <Up> <Down> <Left>
 <Right> <Home> <End> <PageUp> <PageDown> <Del> <C-x> <Nop>`.
 Write spaces as `<Space>`. Mappings are not recursive. See `examples/keymap.conf`.
 
-Command history, search history, and file positions are stored in
-`$XDG_STATE_HOME/qalam/history` (default `~/.local/state/qalam/history`).
-Turn all of it off with `set nohistory`. Mouse reporting is on by default, and
-`set nomouse` gives plain drag-select back to your terminal.
+Command history, search history, file positions, and undo files are stored under
+`$XDG_STATE_HOME/qalam/` (default `~/.local/state/qalam/`), with undo files in an
+`undo/` folder beside the `history` file. Turn all of it off with `set nohistory`,
+and delete the folder at any time to reset it. Mouse reporting is on by default,
+and `set nomouse` gives plain drag-select back to your terminal.
 
 ## Architecture
 
@@ -256,15 +266,15 @@ src/
 ├── buffer/      TextBuffer interface, chunked line store, edits, file I/O
 ├── motions/     composable motions and text objects (they return ranges)
 ├── search/      regex engine, search, substitution
-├── undo/        grouped edit history
-├── syntax/      table-driven tokenizer for nine languages
+├── undo/        grouped edit history with validated persistence
+├── syntax/      table-driven tokenizer for nine languages, incremental updates
 ├── input/       key notation and keymap
 ├── config/      config file parser
 ├── clipboard/   system clipboard via native tools or OSC 52
 ├── finder/      fuzzy scoring and project file listing
 ├── window/      split layout tree
 ├── render/      state → one frame string
-├── editor/      modes, registers, macros, marks, ex commands, picker
+├── editor/      modes, registers, macros, marks, ex commands, picker, help
 └── main.cpp
 tests/           unit and scenario tests, no framework
 bench/           benchmark for buffer, history, search, syntax, and editor commands
@@ -291,10 +301,11 @@ ctest --test-dir build --output-on-failure
 ```
 
 The tests cover the text, buffer, undo, regex, motion, syntax, config, layout,
-rendering, file I/O, key decoding, bidi, fuzzy matching, picker, mouse, and
-session layers, plus `Editor` itself, driven by key strings such as `"3dd"` or
-`":%s/a/b/g<CR>"` with no terminal. Pass `-DQALAM_BUILD_TESTS=OFF` to skip them,
-or `-DQALAM_SANITIZE=ON` to build with AddressSanitizer and UBSan.
+rendering, file I/O, key decoding, bidi, fuzzy matching, picker, mouse, session,
+undo persistence, help, sort, and whitespace layers, plus `Editor` itself, driven
+by key strings such as `"3dd"` or `":%s/a/b/g<CR>"` with no terminal. Pass
+`-DQALAM_BUILD_TESTS=OFF` to skip them, or `-DQALAM_SANITIZE=ON` to build with
+AddressSanitizer and UBSan.
 
 CI builds Debug and Release on Linux and macOS, and runs the suite once more
 under the sanitizers.
@@ -313,25 +324,25 @@ cmake --build build-bench
 - [x] Buffers, file load and save, scrolling
 - [x] Normal, Insert, Visual (char, line, block), Command modes
 - [x] Motions, operators, counts, text objects, dot repeat
-- [x] Undo and redo
-- [x] Regex search and substitution, `:g`, `:normal`
+- [x] Undo and redo, persistent across sessions
+- [x] Regex search and substitution, `:g`, `:normal`, `:sort`
 - [x] Registers (named, numbered, black hole), macros, marks, jump list
 - [x] System clipboard and bracketed paste
 - [x] Config file, remappable keys, runtime `:map`
 - [x] UTF-8 and wide characters
-- [x] Syntax highlighting for nine languages
+- [x] Syntax highlighting for nine languages, incremental updates
 - [x] Multiple buffers and window splits
-- [x] Line numbers, soft wrap, indentation options
+- [x] Line numbers, soft wrap, indentation options, `:retab`, `:trim`
 - [x] Command-line editing, history, completion
 - [x] Atomic saves, CRLF handling, binary-safe I/O
 - [x] Unit and scenario tests, CI with sanitizers
 - [x] Chunked line store with benchmark
 - [x] Fuzzy file and buffer finder, live picker with match highlighting
-- [x] Mouse support
-- [x] Remembered cursor positions
+- [x] Mouse support, remembered cursor positions
+- [x] In-editor manual (`:help`), `--version`, `--help`
 - [x] Arabic: bidi display, visual `h`/`l`, Arabic command aliases
 - [ ] Arabic: mirrored brackets, RTL end-of-line cursor, visual `j`/`k` columns
-- [ ] Persistent undo
+- [ ] First tagged release (v0.1.0)
 
 ## Contributing
 
